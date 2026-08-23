@@ -189,10 +189,33 @@ Item {
     property bool naming: false
     property string draft: ""
 
+    /// What is being looked for, across every tab at once. Empty is the panel
+    /// as it was: six tabs, one of them open.
+    property string query: ""
+    /// True while the keys build the query rather than walk the list.
+    ///
+    /// The picker's two modes, in a panel: `/` starts typing, Enter or Escape
+    /// stops without dropping what was found, so `j`/`k` and `h`/`l` land on the
+    /// results rather than in the field. A panel where every key was a letter
+    /// could be searched and not used.
+    property bool typing: false
+
+    readonly property bool searching: panel.query.trim().length > 0
+
+    /// How many settings the query kept — what the field reports, so that a
+    /// search finding nothing says so before you have read the empty list.
+    readonly property int matchCount: panel.rows.filter(row => row.kind !== "header" && row.kind !== "empty").length
+
     /// The saved presets, as a string so the list is only rebuilt when the set
     /// of them actually changes.
     readonly property string presetState: Presets.names.join("\u0000")
 
+    onQueryChanged: {
+        panel.rows = panel.buildRows();
+        panel.currentIndex = -1;
+        panel.step(1); // the first result, past the tab it is filed under
+        flick.contentY = 0;
+    }
     onColorStateChanged: panel.rows = panel.buildRows()
     onTagStateChanged: panel.rows = panel.buildRows()
     onPresetStateChanged: panel.rows = panel.buildRows()
@@ -218,7 +241,22 @@ Item {
         panel.step(1);
     }
 
+    /// The rows the panel is showing: one tab's, or what the search found.
+    ///
+    /// Asks the query rather than `searching`, though they say the same thing:
+    /// this runs from `onQueryChanged`, and a property derived from `query` is
+    /// not guaranteed to have been recomputed by the time a change handler for
+    /// `query` itself runs. Reading the derived one emptied the field into a
+    /// search for nothing, which matched every row of every tab.
     function buildRows(): var {
+        if (panel.query.trim().length > 0)
+            return panel.searchRows();
+        return panel.tabRows(panel.tabs[panel.tab].key);
+    }
+
+    /// The rows of one tab — whichever tab, rather than only the open one, so
+    /// that the search can walk all six without opening any of them.
+    function tabRows(tab: string): var {
         const rows = [];
         // Every key this tab put on screen, which is exactly what its Reset is
         // allowed to touch — the same group is split across the two panels.
@@ -269,7 +307,7 @@ Item {
             });
         };
 
-        switch (panel.tabs[panel.tab].key) {
+        switch (tab) {
         case "modes":
             group("Entries of the mode menu");
             toggle("modes", "dark", "Dark");
@@ -491,7 +529,7 @@ Item {
         }
 
         // The Tags tab has nothing to put back: its rows are jobs, not values.
-        if (["tags", "presets"].includes(panel.tabs[panel.tab].key))
+        if (["tags", "presets"].includes(tab))
             return rows;
 
         rows.push({
@@ -500,10 +538,75 @@ Item {
         });
         rows.push({
             kind: "reset",
-            group: panel.tabs[panel.tab].key,
+            group: tab,
             keys: touched,
             label: "Reset"
         });
+        return rows;
+    }
+
+    /// Every row of every tab that the query keeps, under the tab it came from.
+    ///
+    /// The tabs are how the panel is arranged, not how it is remembered: you
+    /// know there is a blur somewhere without knowing it is filed under Color,
+    /// and forty-odd rows in six places is exactly where a name beats a map.
+    ///
+    /// A row is matched on its own label, on the heading above it and on the
+    /// name of its tab, so `blur` finds it, and so does `color` — which brings
+    /// back the whole tab, the search doubling as a way to open one.
+    ///
+    /// The heading is carried into the label rather than dropped, because
+    /// without it the results are ambiguous: Shape has a `Window` under Corners
+    /// and another under Borders, and out of their tab they are the same word
+    /// twice.
+    function searchRows(): var {
+        const terms = panel.query.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+        const rows = [];
+
+        // Nothing typed is not everything found: `[].every()` is true, so a
+        // query of no terms would keep every row of every tab.
+        if (terms.length === 0)
+            return [
+                {
+                    kind: "empty"
+                }
+            ];
+
+        for (const tab of panel.tabs) {
+            const found = [];
+            let heading = "";
+            for (const row of panel.tabRows(tab.key)) {
+                if (row.kind === "header") {
+                    heading = row.label;
+                    continue;
+                }
+                // A Reset puts back a tab rather than a value, and a note is
+                // prose about one — neither is something you go looking for.
+                if (row.kind === "reset" || row.kind === "note")
+                    continue;
+                const label = (row.label ?? "").trim();
+                const haystack = `${label} ${heading} ${tab.label}`.toLowerCase();
+                if (!terms.every(term => haystack.includes(term)))
+                    continue;
+                found.push(Object.assign({}, row, {
+                    label: heading ? `${heading} ▸ ${label}` : label
+                }));
+            }
+            if (found.length === 0)
+                continue;
+            rows.push({
+                kind: "header",
+                label: tab.label
+            });
+            for (const row of found) {
+                rows.push(row);
+            }
+        }
+
+        if (rows.length === 0)
+            rows.push({
+                kind: "empty"
+            });
         return rows;
     }
 
@@ -535,7 +638,7 @@ Item {
 
     function step(direction: int) {
         let index = panel.currentIndex + direction;
-        while (index >= 0 && index < panel.rows.length && panel.rows[index].kind === "header") {
+        while (index >= 0 && index < panel.rows.length && ["header", "empty"].includes(panel.rows[index].kind)) {
             index += direction;
         }
         if (index >= 0 && index < panel.rows.length) {
@@ -545,6 +648,10 @@ Item {
     }
 
     function selectTab(index: int) {
+        // Asking for a tab is asking to be out of the results. Clearing the
+        // query is what rebuilds the rows when the tab asked for is the one
+        // already open, which `onTabChanged` alone would not notice.
+        panel.clearSearch();
         panel.tab = (index + panel.tabs.length) % panel.tabs.length;
     }
 
@@ -621,12 +728,61 @@ Item {
         return true;
     }
 
+    /// Builds the query while `typing`, the way `typeName` builds a preset's
+    /// name — and for the same reason: there is no field to focus.
+    ///
+    /// Only the letters are taken. Everything else — the arrows, Enter, Escape —
+    /// falls through to the list below, so the results can be walked without
+    /// leaving the field first, exactly as the picker's search field behaves.
+    function typeQuery(event): bool {
+        switch (event.key) {
+        case Qt.Key_Escape:
+            // The picker's Esc: out of the field, keeping what it found. Only an
+            // empty one closes the search outright.
+            panel.typing = false;
+            if (!panel.searching)
+                panel.clearSearch();
+            return true;
+        case Qt.Key_Return:
+        case Qt.Key_Enter:
+            panel.typing = false;
+            return true;
+        case Qt.Key_Backspace:
+            panel.query = panel.query.slice(0, -1);
+            return true;
+        }
+        if (event.text && event.text.charCodeAt(0) >= 0x20) {
+            panel.query += event.text;
+            return true;
+        }
+        return false; // arrows, page keys: walk the results from inside the field
+    }
+
+    /// Puts the tabs back.
+    function clearSearch() {
+        panel.typing = false;
+        panel.query = "";
+    }
+
     function handleKey(event): bool {
         if (panel.naming)
             return panel.typeName(event);
 
+        // The letters belong to the query while it is being typed; anything the
+        // field has no use for carries on to the list.
+        if (panel.typing && panel.typeQuery(event))
+            return true;
+
         const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
         const big = shift ? 10 : 1;
+
+        // `/` is the picker's own way into its search field, and this is the
+        // same panel's. Not while typing: there it is a character like any
+        // other, which `typeQuery` above has already taken.
+        if (event.key === Qt.Key_Slash || (event.key === Qt.Key_F && (event.modifiers & Qt.ControlModifier))) {
+            panel.typing = true;
+            return true;
+        }
 
         // 1 to 4 jump straight to a tab.
         if (event.key >= Qt.Key_1 && event.key < Qt.Key_1 + panel.tabs.length) {
@@ -700,6 +856,13 @@ Item {
         }
         case Qt.Key_Escape:
         case Qt.Key_Q:
+            // A search is a layer over the panel, so it is what Escape drops
+            // first — closing the window from under a result you were reading
+            // would be one keystroke too eager.
+            if (panel.searching) {
+                panel.clearSearch();
+                return true;
+            }
             panel.closed();
             return true;
         }
@@ -748,7 +911,7 @@ Item {
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "tab  ·  j k  ·  h l  ·"
+                text: "/  ·  tab  ·  j k  ·  h l  ·"
                 color: Colors.foreground
                 font.family: Style.textFont
                 font.pixelSize: Style.textSize * 0.85
@@ -865,11 +1028,135 @@ Item {
             }
         }
 
+        /// The search field. Folded away to nothing until it is asked for, so
+        /// the panel is the panel until you need it to be a list.
+        ///
+        /// Not a TextInput, for the reason SettingName gives: the panel already
+        /// owns the keyboard and a focused field inside it would have to win it
+        /// back and hand it over again cleanly. It draws a string and a caret,
+        /// and `typeQuery` collects the letters.
+        Item {
+            id: searchBar
+
+            x: tabBar.x
+            y: tabBar.y + tabBar.height
+            width: tabBar.width - panel.scrollGutter
+            // Zero when it is not wanted, which is what keeps the rows exactly
+            // where they were before there was a search at all.
+            height: panel.typing || panel.searching ? 42 : 0
+            clip: true
+
+            Behavior on height {
+                NumberAnimation {
+                    duration: Style.fadeDuration
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 34
+                radius: Style.picker.entryRadius + 4
+                color: "transparent"
+                border.width: 3
+                // The picker's own tell: the colour that holds the keyboard is
+                // not the colour that has handed it back.
+                border.color: panel.typing ? Colors.urgent : Colors.selected
+
+                Behavior on border.color {
+                    ColorAnimation {
+                        duration: Style.fadeDuration
+                    }
+                }
+
+                Text {
+                    id: glass
+
+                    anchors.left: parent.left
+                    anchors.leftMargin: 11
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "\uf002" // fa-search
+                    color: Colors.foreground
+                    opacity: 0.55
+                    font.family: Style.iconFont
+                    font.pixelSize: Style.textSize
+                }
+
+                Text {
+                    id: typed
+
+                    anchors.left: glass.right
+                    anchors.leftMargin: 9
+                    anchors.right: tally.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideLeft
+                    text: panel.query
+                    color: Colors.foreground
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize * 0.9
+                }
+
+                Text {
+                    anchors.left: glass.right
+                    anchors.leftMargin: 9
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: panel.query === ""
+                    text: "Search every tab"
+                    color: Colors.foreground
+                    opacity: 0.4
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize * 0.9
+                }
+
+                /// How much the query left, so a search that finds nothing says
+                /// so before you have read the empty list.
+                Text {
+                    id: tally
+
+                    anchors.right: parent.right
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: panel.searching
+                    text: panel.matchCount === 1 ? "1 setting" : `${panel.matchCount} settings`
+                    color: panel.matchCount === 0 ? Colors.urgent : Colors.foreground
+                    opacity: panel.matchCount === 0 ? 1 : 0.5
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize * 0.8
+                }
+
+                /// Sits after the last letter while the field holds the keys.
+                Rectangle {
+                    x: Math.min(glass.x + glass.width + 9 + typed.implicitWidth + 2, tally.x - 6)
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: panel.typing
+                    width: 2
+                    height: parent.height * 0.55
+                    color: Colors.foreground
+
+                    SequentialAnimation on opacity {
+                        loops: Animation.Infinite
+                        running: true
+
+                        NumberAnimation {
+                            to: 0
+                            duration: 480
+                        }
+                        NumberAnimation {
+                            to: 1
+                            duration: 480
+                        }
+                    }
+                }
+            }
+        }
+
         Flickable {
             id: flick
 
             x: tabBar.x
-            y: tabBar.y + tabBar.height + 10
+            y: searchBar.y + searchBar.height + 10
             width: tabBar.width - panel.scrollGutter
             height: parent.height - y - Style.picker.headerX
             clip: true
@@ -967,6 +1254,8 @@ Item {
                                     return nameRow;
                                 case "note":
                                     return noteRow;
+                                case "empty":
+                                    return emptyRow;
                                 case "reset":
                                     return resetRow;
                                 default:
@@ -1144,6 +1433,23 @@ Item {
                                     opacity: 0.55
                                     font.family: Style.textFont
                                     font.pixelSize: Style.textSize * 0.85
+                                }
+                            }
+                        }
+
+                        Component {
+                            id: emptyRow
+
+                            Item {
+                                implicitHeight: 44
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "No setting goes by that name."
+                                    color: Colors.foreground
+                                    opacity: 0.55
+                                    font.family: Style.textFont
+                                    font.pixelSize: Style.textSize * 0.9
                                 }
                             }
                         }

@@ -540,7 +540,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
                     }
                     None => thread::sleep(Duration::from_secs(3)),
                 }
-                let _ = Command::new("spicetify").arg("reload").status();
+                let _ = Command::new("spicetify").arg("watch").status();
             }
         }));
     }
@@ -715,7 +715,9 @@ fn run_quickshell(config: &Path, mode: &str, items: Option<&str>) -> Option<Stri
 /// no prompt, so a timer can call it.
 fn apply_time_of_day() {
     let moment = get_moment_journee();
-    if let Some(wp) = pick_random(&home_dir().join(format!("Pictures/Wallpapers/season-time/{moment}"))) {
+    if let Some(wp) =
+        pick_random(&home_dir().join(format!("Pictures/Wallpapers/season-time/{moment}")))
+    {
         apply_all(&wp, moment == "night" || moment == "sunset");
     }
 }
@@ -723,7 +725,9 @@ fn apply_time_of_day() {
 /// Random wallpaper for the season it is. Always light, as the menu has it.
 fn apply_season() {
     let saison = get_saison();
-    if let Some(wp) = pick_random(&home_dir().join(format!("Pictures/Wallpapers/season-time/{saison}"))) {
+    if let Some(wp) =
+        pick_random(&home_dir().join(format!("Pictures/Wallpapers/season-time/{saison}")))
+    {
         apply_all(&wp, false);
     }
 }
@@ -1061,7 +1065,11 @@ color_scheme           = Comfy
         writer.join().unwrap();
 
         // A file that is not there at all is not worth waiting for forever.
-        assert!(!wait_for_write(&dir.join("gone.ini"), since, Duration::from_millis(200)));
+        assert!(!wait_for_write(
+            &dir.join("gone.ini"),
+            since,
+            Duration::from_millis(200)
+        ));
 
         fs::remove_dir_all(&dir).unwrap();
     }

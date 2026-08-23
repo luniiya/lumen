@@ -17,21 +17,24 @@ desktop — light or dark, in one keypress.
 
 ##  ⚡ Quick start
 
-```bash
-# 1 — grab the latest binary from the Releases page
-tar xzf lumen-*-x86_64-linux-gnu.tar.gz
-sudo install -m 755 lumen /usr/local/bin/
+On **Arch or CachyOS**, one command does the lot — dependencies, build, folders
+and config:
 
-# 2 — drop your wallpapers in
-mkdir -p ~/Pictures/Wallpapers/{dark,light}
+```bash
+git clone https://github.com/tungsten-w/lumen.git && ./lumen/install/install.sh
 ```
+
+It asks where you keep your wallpapers, which optional pieces you want, and
+whether to build the latest release or `main`. Then bind it:
 
 ```ini
-# 3 — bind it in ~/.config/hypr/hyprland.conf
-bind = $mainMod, W, exec, /usr/local/bin/lumen
+# ~/.config/hypr/hyprland.conf
+bind = $mainMod, W, exec, ~/.cargo/bin/lumen
 ```
 
-That's it — hit <kbd>Super</kbd>+<kbd>W</kbd> and pick an image.
+That's it — hit <kbd>Super</kbd>+<kbd>W</kbd> and pick an image. Running the
+script again is how you update, and `--dry-run` shows you the whole thing first.
+Anywhere else, see **Installation** below.
 
 ---
 
@@ -252,12 +255,29 @@ is no thumbnail zoom in the menu's panel, and no menu entries in the picker's:
 | Tab | The menu's | The picker's |
 |---|---|---|
 | **Presets** | Save the whole configuration under a name, put any of them back, or write your changes into one you already have | The same |
+
+Six tabs, and <kbd>/</kbd> if you would rather not remember which one a setting is in.
 | **Entries** | Which of the four modes the menu offers | — |
 | **Shape** | Window corner and border, the selected entry's pill and ring | Corners of the window, header, thumbnails and search field; window and thumbnail borders |
 | **Tags** | — | Install [wallreco](https://github.com/tungsten-w/wallreco), or run it to tag new wallpapers and recompute the old ones |
 | **Motion** | Animations on/off, speed, bounce, selection lift, and each duration on its own | The same, plus the grid's thumbnail stagger |
 | **Layout** | Menu size, columns, icon size, wallpaper backdrop | Grid and spacing, thumbnails, backdrop, window and header sizes, search field |
 | **Color** | Which palette to follow, background opacity, blur behind the window, and four palette colors | The same, plus the thumbnail border |
+
+**<kbd>/</kbd> searches every tab at once.** The tabs are how the panel is
+arranged, not how it is remembered: you know there is a blur *somewhere* without
+knowing it is filed under Color. Typing filters all six at once and lists what is
+left under the tab it came from, with its heading carried along — so Shape's two
+`Window` rows come back as *Corners ▸ Window* and *Borders ▸ Window* rather than
+as the same word twice. A tab's own name matches too, which makes the search a
+second way to open one, and presets match by name.
+
+It borrows the picker's two modes rather than stealing the keyboard: <kbd>/</kbd>
+(or <kbd>Ctrl</kbd>+<kbd>F</kbd>) starts typing, <kbd>Enter</kbd> or
+<kbd>Esc</kbd> steps out **keeping** what was found, so <kbd>j</kbd>/<kbd>k</kbd>
+walk the results and <kbd>h</kbd>/<kbd>l</kbd> change them in place. A second
+<kbd>Esc</kbd> drops the search and puts the tabs back; only then does one close
+the panel. Picking a tab leaves the results too.
 
 The bar draws **an icon per tab** rather than a name: six names fought over the
 width of the panel and had to be shrunk to fit, six glyphs do not. Hovering one
@@ -326,6 +346,7 @@ back.
 
 | Panel | |
 |---|---|
+| <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search every tab at once |
 | <kbd>Tab</kbd> / <kbd>1</kbd>…<kbd>6</kbd> | Move between tabs |
 | <kbd>u</kbd> | Write your changes into the preset under the cursor |
 | <kbd>x</kbd> | Delete the preset under the cursor (twice, it asks) |
@@ -333,7 +354,7 @@ back.
 | <kbd>h</kbd> / <kbd>l</kbd> | Change the value (<kbd>Shift</kbd> for ten times the step) |
 | <kbd>Enter</kbd> | Flip a switch, or pin a color |
 | <kbd>r</kbd> | Reset the tab you are in — only what it shows, never the other panel's half |
-| <kbd>Esc</kbd> / <kbd>q</kbd> | Close the panel |
+| <kbd>Esc</kbd> / <kbd>q</kbd> | Drop the search, then close the panel |
 
 Values land in `~/.config/lumen/settings.json` as you move a slider — there is no
 save button, because there is nothing to save. The file is hand-editable and
@@ -434,14 +455,44 @@ sweeps out the ones whose wallpaper is gone.
 
 ##  Installation
 
-The three lines at the top of this file are the short version. In full:
+The command at the top of this file is the short version. In full:
 
 <details>
-<summary><b>Binary or source</b>, the keybind, and linking the picker's config &nbsp;<i>(click to unfold)</i></summary>
+<summary><b>The script, the binary, or source</b> &mdash; and linking the picker's config &nbsp;<i>(click to unfold)</i></summary>
 
 <br>
 
-### Option 1 — prebuilt binary (recommended)
+### Option 1 — `install.sh` (Arch and CachyOS, recommended)
+
+```bash
+git clone https://github.com/tungsten-w/lumen.git
+./lumen/install/install.sh
+```
+
+It keeps a checkout in `~/.local/share/lumen` — or uses the clone you ran it
+from — builds with `cargo install`, and links `quickshell/lumen` and the two rofi
+themes out of it. Dependencies come from your repositories where they exist and
+from the AUR where they do not, which is why the package names are not
+hard-coded: CachyOS ships `awww`, `matugen` and `quickshell` itself, plain Arch
+has them under other names or not at all.
+
+Wallpapers can live wherever you like: the script makes the folders there and
+points `~/Pictures/Wallpapers` at them, since that is the one path the binary
+knows. A folder you already have is never deleted — it offers to move it, and
+refuses to do so unattended.
+
+| Flag | |
+|---|---|
+| `--dry-run` | print every step, change nothing |
+| `--yes` | take every default, ask nothing |
+| `--ref REF` | build this tag, branch or commit |
+| `--src DIR` | keep the checkout somewhere else |
+
+Run it again to update. Every step notices what is already done. Every step it
+takes and every path it touches is written out in
+**[install/README.md](install/README.md)**.
+
+### Option 2 — prebuilt binary
 
 Grab the latest `lumen-*-x86_64-linux-gnu.tar.gz` from the
 [Releases page](https://github.com/tungsten-w/lumen/releases), then:
@@ -452,7 +503,7 @@ chmod +x lumen
 sudo mv lumen /usr/local/bin/
 ```
 
-### Option 2 — build from source
+### Option 3 — build from source
 
 ```bash
 git clone https://github.com/tungsten-w/lumen.git
@@ -538,7 +589,7 @@ Part of my dotfiles: [tungsten-w/.config](https://github.com/tungsten-w/.config)
 <br>
 
 - [ ] Config file for custom paths (drop the hard-coded `~/Pictures/Wallpapers`)
-- [ ] Proper `install.sh` <--- (im working on it ( ˘͈ ᵕ ˘͈♡))
+- [x] Proper [`install.sh`](install/README.md) (Arch and CachyOS)
 - [ ] Finish the wallpaper recognition script
 - [x] Transitions
 - [x] Settings panel (Ctrl+, / `lumen --settings`)
