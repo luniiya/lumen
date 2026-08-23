@@ -17,24 +17,21 @@ desktop — light or dark, in one keypress.
 
 ##  ⚡ Quick start
 
-On **Arch or CachyOS**, one command does the lot — dependencies, build, folders
-and config:
-
 ```bash
-git clone https://github.com/tungsten-w/lumen.git && ./lumen/install/install.sh
-```
+# 1 — grab the latest binary from the Releases page
+tar xzf lumen-*-x86_64-linux-gnu.tar.gz
+sudo install -m 755 lumen /usr/local/bin/
 
-It asks where you keep your wallpapers, which optional pieces you want, and
-whether to build the latest release or `main`. Then bind it:
+# 2 — drop your wallpapers in
+mkdir -p ~/Pictures/Wallpapers/{dark,light}
+```
 
 ```ini
-# ~/.config/hypr/hyprland.conf
-bind = $mainMod, W, exec, ~/.cargo/bin/lumen
+# 3 — bind it in ~/.config/hypr/hyprland.conf
+bind = $mainMod, W, exec, /usr/local/bin/lumen
 ```
 
-That's it — hit <kbd>Super</kbd>+<kbd>W</kbd> and pick an image. Running the
-script again is how you update, and `--dry-run` shows you the whole thing first.
-Anywhere else, see **Installation** below.
+That's it — hit <kbd>Super</kbd>+<kbd>W</kbd> and pick an image.
 
 ---
 
@@ -455,44 +452,14 @@ sweeps out the ones whose wallpaper is gone.
 
 ##  Installation
 
-The command at the top of this file is the short version. In full:
+The three lines at the top of this file are the short version. In full:
 
 <details>
-<summary><b>The script, the binary, or source</b> &mdash; and linking the picker's config &nbsp;<i>(click to unfold)</i></summary>
+<summary><b>Binary or source</b>, the keybind, and linking the picker's config &nbsp;<i>(click to unfold)</i></summary>
 
 <br>
 
-### Option 1 — `install.sh` (Arch and CachyOS, recommended)
-
-```bash
-git clone https://github.com/tungsten-w/lumen.git
-./lumen/install/install.sh
-```
-
-It keeps a checkout in `~/.local/share/lumen` — or uses the clone you ran it
-from — builds with `cargo install`, and links `quickshell/lumen` and the two rofi
-themes out of it. Dependencies come from your repositories where they exist and
-from the AUR where they do not, which is why the package names are not
-hard-coded: CachyOS ships `awww`, `matugen` and `quickshell` itself, plain Arch
-has them under other names or not at all.
-
-Wallpapers can live wherever you like: the script makes the folders there and
-points `~/Pictures/Wallpapers` at them, since that is the one path the binary
-knows. A folder you already have is never deleted — it offers to move it, and
-refuses to do so unattended.
-
-| Flag | |
-|---|---|
-| `--dry-run` | print every step, change nothing |
-| `--yes` | take every default, ask nothing |
-| `--ref REF` | build this tag, branch or commit |
-| `--src DIR` | keep the checkout somewhere else |
-
-Run it again to update. Every step notices what is already done. Every step it
-takes and every path it touches is written out in
-**[install/README.md](install/README.md)**.
-
-### Option 2 — prebuilt binary
+### Option 1 — prebuilt binary (recommended)
 
 Grab the latest `lumen-*-x86_64-linux-gnu.tar.gz` from the
 [Releases page](https://github.com/tungsten-w/lumen/releases), then:
@@ -503,7 +470,7 @@ chmod +x lumen
 sudo mv lumen /usr/local/bin/
 ```
 
-### Option 3 — build from source
+### Option 2 — build from source
 
 ```bash
 git clone https://github.com/tungsten-w/lumen.git
@@ -589,12 +556,13 @@ Part of my dotfiles: [tungsten-w/.config](https://github.com/tungsten-w/.config)
 <br>
 
 - [ ] Config file for custom paths (drop the hard-coded `~/Pictures/Wallpapers`)
-- [x] Proper [`install.sh`](install/README.md) (Arch and CachyOS)
+- [ ] Proper `install.sh` <--- (im working on it ( ˘͈ ᵕ ˘͈♡))
 - [ ] Finish the wallpaper recognition script
 - [x] Transitions
-- [x] Settings panel (Ctrl+, / `lumen --settings`)
+- [x] Settings panel (Ctrl+/`lumen --settings`/settings in the search bar)
 - [x] use rust instead of bash
 - [x] Quickshell
+- [ ] Release it on the AUR 
 
 </details>
 
