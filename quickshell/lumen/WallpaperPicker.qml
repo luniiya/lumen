@@ -30,6 +30,19 @@ OverlayWindow {
     /// by accident. Set by shell.qml for the settings mode.
     property bool preview: false
 
+    /// Set when `lumen` opened this grid on a folder of your own.
+    ///
+    /// Those folders are neither dark nor light — the same directory can hold
+    /// both — so unlike `dark/` and `light/` there is nothing to infer. The mode
+    /// is asked for once you have chosen, and the answer carries it in front of
+    /// the path.
+    property bool askMode: false
+
+    /// The wallpaper waiting on a dark-or-light answer, or empty.
+    property string pendingPick: ""
+    /// Which of the two the cursor is on while the question is up.
+    property bool pendingDark: true
+
     aside: SettingsPanel {
         id: settings
 
@@ -135,8 +148,48 @@ OverlayWindow {
         if (win.preview)
             return;
         const wallpaper = win.matches[win.currentIndex];
-        if (wallpaper)
-            Result.accept(wallpaper.path);
+        if (!wallpaper)
+            return;
+        if (win.askMode) {
+            win.pendingPick = wallpaper.path;
+            win.pendingDark = true;
+            return;
+        }
+        Result.accept(wallpaper.path);
+    }
+
+    /// Answers with the mode in front of the path, which is what `lumen` splits
+    /// on. Only the first colon is the separator, so a wallpaper named with one
+    /// still arrives whole.
+    function answerMode(dark: bool) {
+        const path = win.pendingPick;
+        win.pendingPick = "";
+        Result.accept((dark ? "dark:" : "light:") + path);
+    }
+
+    /// The question owns the keyboard while it is up, and swallows everything —
+    /// a letter that leaked through would land in the search field behind it.
+    function modeKey(event): bool {
+        switch (event.key) {
+        case Qt.Key_H:
+        case Qt.Key_Left:
+            win.pendingDark = true;
+            return true;
+        case Qt.Key_L:
+        case Qt.Key_Right:
+            win.pendingDark = false;
+            return true;
+        case Qt.Key_Return:
+        case Qt.Key_Enter:
+        case Qt.Key_Space:
+            win.answerMode(win.pendingDark);
+            return true;
+        case Qt.Key_Escape:
+        case Qt.Key_Q:
+            win.pendingPick = ""; // back to the grid, nothing chosen
+            return true;
+        }
+        return true;
     }
 
     /// Ctrl+, — the shortcut editors use, and the one key that always means the
@@ -249,6 +302,10 @@ OverlayWindow {
     /// Returns whether the key was used up; anything else falls through to the
     /// search field as text.
     function routeKey(event): bool {
+        // A question is modal: it is answered before anything else happens.
+        if (win.pendingPick !== "")
+            return win.modeKey(event);
+
         if (win.isSettingsKey(event)) {
             win.asideOpen = !win.asideOpen;
             return true;
@@ -694,6 +751,132 @@ OverlayWindow {
                         duration: Style.enterDuration
                         easing.type: Easing.OutCubic
                     }
+                }
+            }
+        }
+
+        /// Dark or light, for a wallpaper out of a folder of your own.
+        ///
+        /// Declared last so it paints over the grid, and it covers the whole
+        /// card rather than floating in a corner: it holds the keyboard, and a
+        /// modal question that does not look modal is one you answer by
+        /// accident.
+        Rectangle {
+            id: question
+
+            anchors.fill: parent
+            radius: Style.picker.radius
+            color: Qt.alpha(Colors.background, 0.94)
+            visible: opacity > 0
+            opacity: win.pendingPick !== "" ? 1 : 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Style.fadeDuration
+                }
+            }
+
+            // Nothing behind it is clickable while it is up.
+            MouseArea {
+                anchors.fill: parent
+                onClicked: win.pendingPick = ""
+            }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 22
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "Dark or light?"
+                    color: Colors.foreground
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize * 1.6
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 18
+
+                    Repeater {
+                        model: [
+                            {
+                                label: "Dark",
+                                glyph: String.fromCodePoint(0xf4ee),
+                                dark: true
+                            },
+                            {
+                                label: "Light",
+                                glyph: String.fromCodePoint(0xf522),
+                                dark: false
+                            }
+                        ]
+
+                        delegate: Rectangle {
+                            id: choice
+
+                            required property var modelData
+                            readonly property bool current: win.pendingDark === choice.modelData.dark
+
+                            width: 150
+                            height: 110
+                            radius: Style.picker.entryRadius + 10
+                            color: choice.current ? Colors.selected : "transparent"
+                            border.width: 3
+                            border.color: choice.current ? Colors.selected : Colors.foreground
+                            opacity: choice.current ? 1 : 0.5
+                            scale: choice.current ? Style.lift : 1
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Style.fadeDuration
+                                }
+                            }
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: Style.moveDuration
+                                    easing.type: Style.springEasing
+                                    easing.overshoot: Style.overshoot(0.1)
+                                }
+                            }
+
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: choice.modelData.glyph
+                                    color: choice.current ? Colors.background : Colors.foreground
+                                    font.family: Style.iconFont
+                                    font.pixelSize: Style.textSize * 2.2
+                                }
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: choice.modelData.label
+                                    color: choice.current ? Colors.background : Colors.foreground
+                                    font.family: Style.textFont
+                                    font.pixelSize: Style.textSize
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.answerMode(choice.modelData.dark)
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "h l  ·  enter  ·  esc to go back"
+                    color: Colors.foreground
+                    opacity: 0.5
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize * 0.85
                 }
             }
         }

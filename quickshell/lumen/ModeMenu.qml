@@ -17,9 +17,8 @@ OverlayWindow {
     windowName: "menu"
 
     /// The strings written to the result file are what `lumen` matches on.
-    /// The glyphs are the Nerd Font codepoints the rofi menu was fed, plus a cog
-    /// from the same set for the settings.
-    readonly property var allEntries: [
+    /// The glyphs are the Nerd Font codepoints the rofi menu was fed.
+    readonly property var builtIn: [
         {
             id: "dark",
             glyph: String.fromCodePoint(0xf4ee),
@@ -39,18 +38,36 @@ OverlayWindow {
             id: "season",
             glyph: String.fromCodePoint(0xf1a79),
             setting: "season"
-        },
-        {
-            id: "settings",
-            glyph: String.fromCodePoint(0xf0493),
-            setting: ""
         }
     ]
 
-    /// The four modes can each be switched off from the panel; the way into the
-    /// panel cannot, or switching the last one off would leave a menu with no
-    /// way back.
-    readonly property var entries: win.allEntries.filter(entry => entry.setting === "" || Settings.modes[entry.setting])
+    /// The way into the settings. Never filtered out: switching the last entry
+    /// off would otherwise leave a menu with no way back.
+    readonly property var cog: ({
+            id: "settings",
+            glyph: String.fromCodePoint(0xf0493)
+        })
+
+    /// The four built-in entries you have left switched on, then your own
+    /// folders, then the cog.
+    ///
+    /// A folder answers with its path rather than with a name, so `lumen` never
+    /// has to know what your categories are: it opens the picker on whatever it
+    /// was handed. The mode is not decided here — it is asked for once you have
+    /// picked an image.
+    readonly property var entries: {
+        const out = win.builtIn.filter(entry => Settings.modes[entry.setting]);
+        for (const folder of Settings.folders ?? []) {
+            if (!folder || !folder.on || !folder.path)
+                continue;
+            out.push({
+                id: "folder:" + folder.path,
+                glyph: Settings.glyph(folder.icon)
+            });
+        }
+        out.push(win.cog);
+        return out;
+    }
 
     // Switching an entry off under the cursor must not leave the selection past
     // the end of the menu.

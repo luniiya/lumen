@@ -515,6 +515,15 @@ make_wallpaper_tree() {
 link_into() {
     local target="$1" link="$2" what="$3"
 
+    # `ln -s` does not check what it points at, so a target that is not there
+    # still links — and leaves a dead link that fails later, somewhere else,
+    # looking like something other than a missing file. A checkout really can be
+    # missing a folder.
+    if [[ ! -e "$target" ]]; then
+        warn "$what: $target is not there. Nothing was linked."
+        return 1
+    fi
+
     if [[ -L "$link" ]]; then
         if [[ "$(readlink -f "$link" || true)" == "$(readlink -f "$target")" ]]; then
             skip "$what already linked"

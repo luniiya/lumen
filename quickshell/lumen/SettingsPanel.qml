@@ -1,6 +1,8 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell
+import Qt.labs.folderlistmodel
 
 /// The settings panel, opened next to the picker with Ctrl+, — by typing
 /// `settings` into its search field — and by `lumen --settings` in a terminal.
@@ -202,6 +204,34 @@ Item {
 
     readonly property bool searching: panel.query.trim().length > 0
 
+    /// Which folder of your own is open for editing, or -1. Opening one grows
+    /// three rows under it, the way pinning a colour grows its three channels.
+    property int openFolder: -1
+    /// Which field of it the keys are being typed into: `name`, `path`, `icon`,
+    /// or nothing.
+    property string editing: ""
+
+    /// The folders as stored, as a real JavaScript array.
+    ///
+    /// Copied out rather than tested. What the JSON adapter hands back is
+    /// array-like and iterable — `for…of` walks it quite happily, which is why
+    /// the mode menu was never troubled — but `Array.isArray` is **false** for
+    /// it, and it carries no `map` or `filter`. A guard written the obvious way
+    /// threw every saved folder away, so the panel showed nothing after a
+    /// restart and a folder you had added looked temporary.
+    readonly property var folders: {
+        const held = Settings.folders;
+        const out = [];
+        if (held && held.length !== undefined)
+            for (let i = 0; i < held.length; i++) {
+                out.push(held[i]);
+            }
+        return out;
+    }
+    /// A string, so the rows are rebuilt when the shape of the list changes
+    /// rather than on every letter typed into one.
+    readonly property string folderState: panel.folders.map(f => `${f.name}\u0001${f.path}\u0001${f.icon}\u0001${f.on}`).join("\u0000")
+
     /// How many settings the query kept — what the field reports, so that a
     /// search finding nothing says so before you have read the empty list.
     readonly property int matchCount: panel.rows.filter(row => row.kind !== "header" && row.kind !== "empty").length
@@ -220,6 +250,10 @@ Item {
     onTagStateChanged: panel.rows = panel.buildRows()
     onPresetStateChanged: panel.rows = panel.buildRows()
     onNamingChanged: panel.rows = panel.buildRows()
+    onFolderStateChanged: panel.rows = panel.buildRows()
+    // The list of folders under the path line comes and goes with it.
+    onEditingChanged: panel.rows = panel.buildRows()
+    onOpenFolderChanged: panel.rows = panel.buildRows()
     onTabChanged: {
         panel.rows = panel.buildRows();
         panel.currentIndex = -1;
@@ -314,6 +348,59 @@ Item {
             toggle("modes", "light", "Light");
             toggle("modes", "time", "Time of day");
             toggle("modes", "season", "Season");
+
+            // Folders of your own sit under the four built-in entries, in the
+            // one tab that is about what the menu offers. They are not part of
+            // the Reset above: `touched` holds keys of a settings group, and a
+            // folder is a path on your disk rather than a value to put back.
+            group("New folder");
+            for (let index = 0; index < panel.folders.length; index++) {
+                const folder = panel.folders[index];
+                rows.push({
+                    kind: "folder",
+                    index: index,
+                    label: folder.name ?? ""
+                });
+                if (panel.openFolder !== index)
+                    continue;
+                rows.push({
+                    kind: "field",
+                    index: index,
+                    field: "name",
+                    label: "Name"
+                });
+                rows.push({
+                    kind: "field",
+                    index: index,
+                    field: "path",
+                    label: "Folder"
+                });
+                if (panel.editing === "path" && panel.openFolder === index)
+                    rows.push({
+                        kind: "paths",
+                        index: index
+                    });
+                rows.push({
+                    kind: "field",
+                    index: index,
+                    field: "icon",
+                    label: "Codepoint"
+                });
+                rows.push({
+                    kind: "icons",
+                    index: index
+                });
+            }
+            rows.push({
+                kind: "action",
+                key: "addFolder",
+                label: "A folder of your own, in the menu",
+                verb: "Add"
+            });
+            rows.push({
+                kind: "note",
+                key: "folders"
+            });
             break;
 
         case "shape":
@@ -610,6 +697,161 @@ Item {
         return rows;
     }
 
+    // ── Folders of your own ────────────────────────────────────────────
+    //
+    // The list is a plain `var`, so it is replaced rather than edited: the same
+    // array mutated in place is the same array, and nothing bound to it would
+    // hear about it.
+
+    function folderAt(index: int): var {
+        return panel.folders[index] ?? null;
+    }
+
+    function writeFolder(index: int, field: string, value: var) {
+        const next = panel.folders.map(folder => Object.assign({}, folder));
+        if (!next[index])
+            return;
+        next[index][field] = value;
+        Settings.setFolders(next);
+    }
+
+    function addFolder() {
+        const next = panel.folders.map(folder => Object.assign({}, folder));
+        next.push({
+            name: "",
+            path: "",
+            icon: "f07b",
+            on: true
+        });
+        Settings.setFolders(next);
+        panel.openFolder = next.length - 1;
+
+        // Rebuilt here rather than left to the change signals, so the row we are
+        // about to put the cursor on already exists.
+        panel.rows = panel.buildRows();
+        panel.jumpToField(next.length - 1, "name");
+    }
+
+    /// Puts the cursor on one of a folder's fields and starts typing into it.
+    ///
+    /// This is what `Add` ends in. Making a folder and then being left to find
+    /// its name field yourself is the step nobody guesses: the rows appear, the
+    /// cursor has not moved, and everything typed goes nowhere.
+    function jumpToField(index: int, field: string) {
+        const at = panel.rows.findIndex(row => row.kind === "field" && row.index === index && row.field === field);
+        if (at < 0)
+            return false;
+        panel.currentIndex = at;
+        panel.reveal();
+        panel.editField(index, field);
+        return true;
+    }
+
+    /// The field after this one, so filling a new folder in is one pass rather
+    /// than a hunt: Name, Enter, Folder, Enter, Codepoint. After the last one it
+    /// simply stops.
+    readonly property var fieldOrder: ["name", "path", "icon"]
+
+    function nextField(after: string) {
+        const at = panel.fieldOrder.indexOf(after);
+        if (at < 0 || at + 1 >= panel.fieldOrder.length)
+            return;
+        panel.jumpToField(panel.openFolder, panel.fieldOrder[at + 1]);
+    }
+
+    function dropFolder(index: int) {
+        const next = panel.folders.filter((folder, at) => at !== index);
+        Settings.setFolders(next);
+        panel.openFolder = -1;
+    }
+
+    // ── Looking where you are typing ───────────────────────────────
+    //
+    // A path is typed here, because the panel has no file dialog and no
+    // clipboard. Typed blind it gets a typo in it, and a typo shows up much
+    // later as a menu entry that opens on nothing. So the directories that are
+    // really there are listed as you go, and `Tab` takes one.
+
+    /// The part of the draft already committed to — everything up to the last
+    /// slash — and the part still being typed after it.
+    ///
+    /// Nothing typed yet means `~/`, and it has to mean it *here* rather than
+    /// only where the list is drawn: the base is what a completion is built on,
+    /// so an empty one made `Pictures/` — a path relative to nothing, which
+    /// resolves to the root of the filesystem and lists `bin`, `boot`, `dev`.
+    readonly property string browseBase: {
+        if (panel.editing !== "path")
+            return "";
+        const cut = panel.draft.lastIndexOf("/");
+        return cut < 0 ? "~/" : panel.draft.slice(0, cut + 1);
+    }
+
+    readonly property string browseLeaf: {
+        if (panel.editing !== "path")
+            return "";
+        const cut = panel.draft.lastIndexOf("/");
+        return cut < 0 ? panel.draft : panel.draft.slice(cut + 1);
+    }
+
+    readonly property url browseUrl: Style.fileUrl(panel.expand(panel.browseBase))
+
+    /// Which of them the cursor is on.
+    property int suggestIndex: 0
+
+    onDraftChanged: panel.suggestIndex = 0
+
+    /// The directories under `browseBase` that what you have typed still allows.
+    ///
+    /// Capped: a home directory with two hundred folders in it would push every
+    /// other row off the panel, and past the first handful you are better off
+    /// typing another letter.
+    readonly property var suggestions: {
+        if (panel.editing !== "path")
+            return [];
+        const leaf = panel.browseLeaf.toLowerCase();
+        const out = [];
+        for (let i = 0; i < browse.count && out.length < 8; i++) {
+            const name = String(browse.get(i, "fileName"));
+            if (leaf === "" || name.toLowerCase().startsWith(leaf))
+                out.push(name);
+        }
+        return out;
+    }
+
+    /// Takes a directory out of the list and goes into it, the way Tab does in a
+    /// shell — trailing slash and all, so the next list is its contents.
+    ///
+    /// Which one is always passed in. A defaulted `at` would not work: QML gives
+    /// a typed `int` parameter 0 rather than `undefined` when it is left out, so
+    /// a `??` fallback to the cursor never fires and Tab quietly takes the first
+    /// row whatever you had highlighted.
+    function completePath(at: int) {
+        const pick = panel.suggestions[at];
+        if (pick === undefined)
+            return;
+        panel.draft = panel.browseBase + pick + "/";
+        panel.suggestIndex = 0;
+    }
+
+    FolderListModel {
+        id: browse
+
+        folder: panel.browseUrl
+        showFiles: false
+        showDirs: true
+        showDotAndDotDot: false
+        // Hidden folders only once you have asked for one by name, so the list
+        // is not half `.cache` and `.local` before you have typed anything.
+        showHidden: panel.browseLeaf.startsWith(".")
+        sortField: FolderListModel.Name
+    }
+
+    /// `~` is what people type and not what anything can open.
+    function expand(path: string): string {
+        const home = Quickshell.env("HOME") ?? "";
+        return path.startsWith("~/") ? home + path.slice(1) : path;
+    }
+
     // ── Colour channels ────────────────────────────────────────────────
 
     function channelValue(key: string, channel: string): real {
@@ -764,9 +1006,58 @@ Item {
         panel.query = "";
     }
 
+    /// Builds a folder's name, path or codepoint. Same bargain as `typeName`:
+    /// the panel owns the keyboard, so the keys that would walk the list write
+    /// into the field instead, and nothing leaks past.
+    function typeField(event): bool {
+        switch (event.key) {
+        case Qt.Key_Escape:
+            panel.editing = "";
+            panel.draft = "";
+            break;
+        case Qt.Key_Return:
+        case Qt.Key_Enter: {
+            const done = panel.editing;
+            panel.writeFolder(panel.openFolder, done, panel.draft);
+            panel.editing = "";
+            panel.draft = "";
+            panel.nextField(done);
+            break;
+        }
+        case Qt.Key_Backspace:
+            panel.draft = panel.draft.slice(0, -1);
+            break;
+        case Qt.Key_Tab:
+            // Shell habits: Tab goes into the folder under the cursor.
+            panel.completePath(panel.suggestIndex);
+            break;
+        case Qt.Key_Down:
+            panel.suggestIndex = Math.min(panel.suggestions.length - 1, panel.suggestIndex + 1);
+            break;
+        case Qt.Key_Up:
+            panel.suggestIndex = Math.max(0, panel.suggestIndex - 1);
+            break;
+        default:
+            if (event.text && event.text.charCodeAt(0) >= 0x20)
+                panel.draft += event.text;
+        }
+        return true;
+    }
+
+    /// Puts a field under the keys, with what it already holds to edit.
+    function editField(index: int, field: string) {
+        const folder = panel.folderAt(index);
+        panel.openFolder = index;
+        panel.editing = field;
+        panel.draft = String(folder ? (folder[field] ?? "") : "");
+    }
+
     function handleKey(event): bool {
         if (panel.naming)
             return panel.typeName(event);
+
+        if (panel.editing !== "")
+            return panel.typeField(event);
 
         // The letters belong to the query while it is being typed; anything the
         // field has no use for carries on to the list.
@@ -1256,6 +1547,14 @@ Item {
                                     return noteRow;
                                 case "empty":
                                     return emptyRow;
+                                case "folder":
+                                    return folderRow;
+                                case "field":
+                                    return fieldRow;
+                                case "icons":
+                                    return iconsRow;
+                                case "paths":
+                                    return pathsRow;
                                 case "reset":
                                     return resetRow;
                                 default:
@@ -1346,7 +1645,7 @@ Item {
                                 /// must not wake the tagger up to ask it whether
                                 /// it is busy — `&&` and `?:` keep the singleton
                                 /// out of the mode menu's panel entirely.
-                                readonly property bool tagger: line.modelData.key !== "save"
+                                readonly property bool tagger: ["install", "tag", "retag"].includes(line.modelData.key)
 
                                 // Only the row that started a job says so; the
                                 // others just go untouchable until it is done.
@@ -1358,6 +1657,9 @@ Item {
                                     case "save":
                                         panel.draft = "";
                                         panel.naming = true;
+                                        break;
+                                    case "addFolder":
+                                        panel.addFolder();
                                         break;
                                     case "install":
                                         Wallreco.install();
@@ -1382,6 +1684,10 @@ Item {
                                 // "Default" is the measurements, not a file, so
                                 // it has neither an Update nor a cross.
                                 stored: line.modelData.key !== ""
+                                // Bound, not built into the row: it has to go
+                                // out on the next slider you move, and the rows
+                                // are only rebuilt when the list of them changes.
+                                active: Presets.isCurrent(line.modelData.key)
                                 busy: Presets.pending === line.modelData.key && line.modelData.key !== ""
                                 apply: () => {
                                     if (line.modelData.key === "")
@@ -1416,10 +1722,12 @@ Item {
                                     width: loader.width
                                     wrapMode: Text.WordWrap
                                     text: {
+                                        if (line.modelData.key === "folders")
+                                            return "Add puts a folder in the mode menu beside Dark and Light, and drops you straight into its name. Enter opens a line to type into and keeps what you typed; Esc leaves it alone. Folder is where your images are, and it shows you what is really there as you type: Tab goes into the folder under the cursor, arrows look around, so a path never has to be typed blind. A folder with no path is never shown in the menu, whatever its switch says. Picking an image from one asks whether it is dark or light.";
                                         if (line.modelData.key === "presets") {
                                             if (Presets.status)
                                                 return Presets.status;
-                                            return "A preset is one JSON file in ~/.config/lumen/presets, shaped exactly like settings.json — readable, hand-editable, and worth sending to someone. Applying writes back only what the file holds, so a preset carrying nothing but colors leaves your layout alone. Update puts what is on screen into a preset you already have, so tuning one is not saving it again under another name; `u` on a row does the same, and `x` deletes it.";
+                                            return "A preset is one JSON file in ~/.config/lumen/presets, shaped exactly like settings.json — readable, hand-editable, and worth sending to someone. Applying writes back only what the file holds, so a preset carrying nothing but colors leaves your layout alone. A dot and a coloured name mark the preset your settings already are — compared, not remembered, so it goes out the moment you move a slider. Update puts what is on screen into a preset you already have, so tuning one is not saving it again under another name. Update and `x` both ask twice; `u` is Update from the keyboard.";
                                         }
                                         if (Wallreco.status)
                                             return Wallreco.status;
@@ -1434,6 +1742,93 @@ Item {
                                     font.family: Style.textFont
                                     font.pixelSize: Style.textSize * 0.85
                                 }
+                            }
+                        }
+
+                        Component {
+                            id: folderRow
+
+                            SettingFolder {
+                                readonly property var held: panel.folderAt(line.modelData.index) ?? ({})
+
+                                width: loader.width
+                                name: held.name ?? ""
+                                glyph: Settings.glyph(held.icon ?? "")
+                                on: held.on === true
+                                ready: String(held.path ?? "") !== ""
+                                open: panel.openFolder === line.modelData.index
+                                selected: line.current
+                                toggled: () => panel.writeFolder(line.modelData.index, "on", !(held.on === true))
+                                erase: () => panel.dropFolder(line.modelData.index)
+                                unfold: () => {
+                                    panel.openFolder = panel.openFolder === line.modelData.index ? -1 : line.modelData.index;
+                                }
+                            }
+                        }
+
+                        Component {
+                            id: fieldRow
+
+                            SettingField {
+                                readonly property var held: panel.folderAt(line.modelData.index) ?? ({})
+                                readonly property string field: line.modelData.field
+                                readonly property bool mine: panel.editing === field && panel.openFolder === line.modelData.index
+                                readonly property string stored: String(held[field] ?? "")
+
+                                width: loader.width
+                                label: line.modelData.label
+                                editing: mine
+                                selected: line.current
+                                hint: {
+                                    if (field === "name")
+                                        return "what it is called in the menu";
+                                    if (field === "path")
+                                        return "where your images are — ~/Pictures/…";
+                                    return "a Nerd Font codepoint, or use the plate below";
+                                }
+                                value: mine ? panel.draft : stored
+                                // A path nothing can open and a codepoint that
+                                // draws nothing are the two ways a folder goes
+                                // quietly missing from the menu.
+                                // Only the codepoint is judged. Whether a path
+                                // leads anywhere is not asked here: the panel
+                                // has no way to stat a directory, and a note
+                                // that guessed would be worse than none.
+                                bad: field === "icon" && stored !== "" && !Settings.drawable(stored)
+                                note: {
+                                    if (field === "path")
+                                        return stored === "" ? "" : panel.expand(stored);
+                                    if (field === "icon")
+                                        return stored === "" ? "" : (Settings.drawable(stored) ? Settings.glyph(stored) + "   nerdfonts.com has the rest" : "Not a codepoint");
+                                    return "";
+                                }
+                                begin: () => panel.editField(line.modelData.index, field)
+                            }
+                        }
+
+                        Component {
+                            id: pathsRow
+
+                            SettingPaths {
+                                width: loader.width
+                                names: panel.suggestions
+                                index: panel.suggestIndex
+                                base: panel.browseBase
+                                selected: true
+                                chose: at => panel.completePath(at)
+                            }
+                        }
+
+                        Component {
+                            id: iconsRow
+
+                            SettingIcons {
+                                readonly property var held: panel.folderAt(line.modelData.index) ?? ({})
+
+                                width: loader.width
+                                value: String(held.icon ?? "")
+                                selected: line.current
+                                chose: hex => panel.writeFolder(line.modelData.index, "icon", hex)
                             }
                         }
 

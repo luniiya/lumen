@@ -28,6 +28,7 @@ Singleton {
     readonly property var layout: adapter.layout
     readonly property var animation: adapter.animation
     readonly property var colors: adapter.colors
+    readonly property var folders: adapter.folders
 
     /// A colour left on this keeps following the palette in `colors.palette`.
     readonly property string auto: "auto"
@@ -122,6 +123,23 @@ Singleton {
                 property bool time: true
                 property bool season: true
             }
+
+            /// Folders of your own, each an entry in the mode menu beside the
+            /// four built-in ones:
+            ///
+            ///     { "name": "anime", "path": "/home/you/Pictures/anime",
+            ///       "icon": "f1fc", "on": true }
+            ///
+            /// `icon` is a Nerd Font codepoint in hex, and `on` is the switch —
+            /// a folder can be put away without being forgotten, the same way
+            /// the four built-in entries can.
+            ///
+            /// A list rather than a group, and deliberately outside `defaults`:
+            /// these are paths on *your* machine, not a look. A preset that
+            /// carried them would rewrite a stranger's menu with folders that
+            /// do not exist on their disk, and resetting a tab would throw away
+            /// a collection rather than a colour. See `snapshot`.
+            property var folders: []
 
             /// Corners and outlines.
             property JsonObject shape: JsonObject {
@@ -247,6 +265,10 @@ Singleton {
 
     /// Every default, and the reason they live in this file rather than in
     /// Style: the panel's reset has to be able to read them back.
+    ///
+    /// `folders` is not here on purpose — see the property itself. Everything
+    /// that walks this object (reset, snapshot, applyValues, satisfies) is about
+    /// values a preset can carry between machines, and a folder path is not one.
     readonly property var defaults: ({
         modes: {
             dark: true,
@@ -381,6 +403,33 @@ Singleton {
         }
     }
 
+    /// Replaces the folder list.
+    ///
+    /// `folders` above is a read-only view of the adapter, the way every group
+    /// is. A group needs no setter because its *properties* are written one at a
+    /// time; a list is replaced whole, so it needs this.
+    function setFolders(list: var) {
+        // Not `Array.isArray`: that is false for anything handed back by the
+        // adapter itself, so testing it that way would quietly wipe the list.
+        adapter.folders = (list && list.length !== undefined) ? list : [];
+    }
+
+    /// A folder's `icon` — a Nerd Font codepoint in hex — as a character.
+    ///
+    /// Blank or unparseable falls back to a plain folder rather than to the
+    /// empty box a bad codepoint draws. The mode menu and the settings panel
+    /// both read the field, so it is spelt out once here.
+    function glyph(hex: string): string {
+        const point = parseInt(hex, 16);
+        return isFinite(point) && point > 0 ? String.fromCodePoint(point) : String.fromCodePoint(0xf07b);
+    }
+
+    /// Whether that codepoint is one the font could draw at all.
+    function drawable(hex: string): bool {
+        const point = parseInt(hex, 16);
+        return isFinite(point) && point > 0;
+    }
+
     /// The name a shared knob goes under for one of the two windows.
     ///
     /// The mode menu's copy of a knob both windows draw is the same key with a
@@ -459,6 +508,43 @@ Singleton {
             }
         }
         return out;
+    }
+
+    /// Whether the configuration on screen already holds everything `values`
+    /// does — so that applying it would change nothing.
+    ///
+    /// This is what lets a preset row say *this is what you have*. It is a
+    /// comparison rather than a name written down when a preset was applied,
+    /// because a name would still be there after the first slider you moved,
+    /// which is exactly when you most want to be told you have left it.
+    ///
+    /// Judged on the subset a file carries, the same rule `applyValues` writes
+    /// by: a preset holding nothing but `colors` is satisfied whenever the
+    /// colours agree, whatever the layout is doing. A file with nothing we
+    /// recognise in it satisfies nothing.
+    function satisfies(values: var): bool {
+        if (!values || typeof values !== "object")
+            return false;
+        let seen = 0;
+        for (const group in values) {
+            const known = root.defaults[group];
+            const incoming = values[group];
+            if (!known || !incoming || typeof incoming !== "object")
+                continue;
+            for (const key in incoming) {
+                if (!(key in known))
+                    continue;
+                seen++;
+                const mine = adapter[group][key];
+                const theirs = incoming[key];
+                // Sliders step in quarters and hundredths, and a value that has
+                // been through JSON and back can land a hair off exact.
+                const equal = (typeof mine === "number" && typeof theirs === "number") ? Math.abs(mine - theirs) < 1e-6 : mine === theirs;
+                if (!equal)
+                    return false;
+            }
+        }
+        return seen > 0;
     }
 
     /// Writes back whatever a preset carries, and leaves everything else where

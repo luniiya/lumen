@@ -26,6 +26,10 @@ Singleton {
     /// Which preset is on its way in, so a second press cannot race the read.
     property string pending: ""
 
+    /// What each preset holds, parsed, keyed by name. Filled in as the files
+    /// are read; what `isCurrent` compares the live configuration against.
+    property var contents: ({})
+
     function path(name: string): string {
         return `${root.directory}/${name}.json`;
     }
@@ -41,6 +45,55 @@ Singleton {
             }
         }
         root.names = found;
+        root.reread();
+    }
+
+    /// Reads any preset we do not already hold the contents of.
+    ///
+    /// Nothing is dropped here. A rescan points the model away from the folder
+    /// and back, so `names` goes empty and full again in the same breath, and
+    /// forgetting on the empty half would blank every row's marker for a frame.
+    /// Rows only exist for names in `names`, so an entry left behind is unread
+    /// rather than wrong.
+    function reread() {
+        for (const name of root.names) {
+            if (!(name in root.contents))
+                peek.createObject(root, {
+                    name: name,
+                    path: root.path(name)
+                });
+        }
+    }
+
+    /// Records what a preset holds without reading it back.
+    ///
+    /// We have just written the file, so we know its contents exactly — and a
+    /// read fired straight after an atomic write is a race worth not having.
+    /// The map is replaced rather than edited: the same object mutated in place
+    /// is the same object, and nothing bound to it would hear about it.
+    function remember(name: string, values: var) {
+        const next = Object.assign({}, root.contents);
+        next[name] = values;
+        root.contents = next;
+    }
+
+    function forget(name: string) {
+        const next = Object.assign({}, root.contents);
+        delete next[name];
+        root.contents = next;
+    }
+
+    /// Whether the configuration on screen already is this preset.
+    ///
+    /// More than one row can say so at once, and that is not a bug: a
+    /// colours-only preset and a whole one can both be satisfied, and applying
+    /// either would change nothing. `Default` is not a file — it is the rofi
+    /// measurements Settings carries.
+    function isCurrent(name: string): bool {
+        if (name === "")
+            return Settings.satisfies(Settings.defaults);
+        const held = root.contents[name];
+        return held ? Settings.satisfies(held) : false;
     }
 
     /// FolderListModel has no refresh of its own, and does not reliably notice
@@ -74,7 +127,9 @@ Singleton {
             root.status = "That name has nothing in it.";
             return;
         }
-        root.write(clean, Settings.snapshot());
+        const values = Settings.snapshot();
+        root.write(clean, values);
+        root.remember(clean, values);
         root.status = `Saved as ${clean}.`;
         Qt.callLater(root.rescan);
     }
@@ -118,6 +173,7 @@ Singleton {
     }
 
     function remove(name: string) {
+        root.forget(name);
         eraser.command = ["rm", "-f", root.path(name)];
         eraser.running = true;
         root.status = `Deleted ${name}.`;
@@ -187,7 +243,9 @@ Singleton {
 
             onLoaded: {
                 try {
-                    root.write(view.name, Settings.snapshot(JSON.parse(view.text())));
+                    const values = Settings.snapshot(JSON.parse(view.text()));
+                    root.write(view.name, values);
+                    root.remember(view.name, values);
                     root.status = `${view.name} updated.`;
                 } catch (error) {
                     root.status = `${view.name} is not readable JSON.`;
@@ -199,6 +257,35 @@ Singleton {
                 root.status = `${view.name} could not be read.`;
                 view.destroy(2000);
             }
+        }
+    }
+
+    /// Reads a preset so its row can say whether it is what you have. One
+    /// reader per file, for the same reason updating has one: a rescan sets
+    /// several going at once, and a single re-pointed FileView would keep only
+    /// the last of them.
+    Component {
+        id: peek
+
+        FileView {
+            id: view
+
+            property string name: ""
+
+            printErrors: false
+
+            onLoaded: {
+                let held = null;
+                try {
+                    held = JSON.parse(view.text());
+                } catch (error) {
+                    held = null; // hand-edited into nonsense: never "current"
+                }
+                root.remember(view.name, held);
+                view.destroy(2000);
+            }
+
+            onLoadFailed: view.destroy(2000)
         }
     }
 

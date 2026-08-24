@@ -7,7 +7,7 @@
 **One wallpaper. One command. Your whole desktop shifts.**
 
 Pick an image, and its colors ripple out to every themed corner of your Hyprland
-desktop — light or dark, in one keypress.
+desktop light or dark, in one keypress.
 
 ![version](https://img.shields.io/badge/version-2.3.1-474064?style=flat-square) ![Rust](https://img.shields.io/badge/built_with-Rust-474064?style=flat-square&logo=rust&logoColor=white) ![Hyprland](https://img.shields.io/badge/Wayland-Hyprland-474064?style=flat-square&logo=hyprland&logoColor=white) ![Quickshell](https://img.shields.io/badge/UI-Quickshell-474064?style=flat-square) ![License](https://img.shields.io/badge/license-MIT-474064?style=flat-square)
 
@@ -17,21 +17,22 @@ desktop — light or dark, in one keypress.
 
 ##  ⚡ Quick start
 
-```bash
-# 1 — grab the latest binary from the Releases page
-tar xzf lumen-*-x86_64-linux-gnu.tar.gz
-sudo install -m 755 lumen /usr/local/bin/
+On **Arch or CachyOS**, the script does all of it — dependencies, build,
+wallpaper folders, picker config:
 
-# 2 — drop your wallpapers in
-mkdir -p ~/Pictures/Wallpapers/{dark,light}
+```bash
+# 1 — clone and run it
+git clone https://github.com/tungsten-w/lumen.git
+./lumen/install/install.sh
 ```
 
 ```ini
-# 3 — bind it in ~/.config/hypr/hyprland.conf
-bind = $mainMod, W, exec, /usr/local/bin/lumen
+# 2 — bind it in your Hyprland config
 ```
 
 That's it — hit <kbd>Super</kbd>+<kbd>W</kbd> and pick an image.
+
+Any other distribution, or you would rather do it yourself: **[Installation](#installation)**.
 
 ---
 
@@ -119,9 +120,8 @@ Launch `lumen` and pick a mode from the menu:
 | ⚙️ | Settings | Open the menu's own settings |
 
 Any of the first four can be switched off in the settings if you never use one.
-The cog cannot — that would leave you with no way back in.
 
-### Without the menu
+### Comands without the menu
 
 ```bash
 lumen --time     # a random wallpaper for the time of day, no prompt
@@ -136,41 +136,8 @@ run that is still painting would leave pywal and matugen writing over each
 other's palette, so the older run is stopped first — along with the tools it
 started, which outlive it.
 
-<details>
-<summary>Running <code>--time</code> on a schedule</summary>
 
-<br>
 
-```ini
-# ~/.config/systemd/user/lumen-time.timer
-[Unit]
-Description=Follow the time of day
-
-[Timer]
-OnCalendar=*-*-* 07,18,22:00:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-```ini
-# ~/.config/systemd/user/lumen-time.service
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/lumen --time
-```
-
-```bash
-systemctl --user enable --now lumen-time.timer
-```
-
-Those three times are the boundaries `lumen` uses itself: day from 07:00, sunset
-from 18:00, night from 22:00.
-
-</details>
-
----
 
 ##  The picker
 
@@ -254,7 +221,7 @@ is no thumbnail zoom in the menu's panel, and no menu entries in the picker's:
 | **Presets** | Save the whole configuration under a name, put any of them back, or write your changes into one you already have | The same |
 
 Six tabs, and <kbd>/</kbd> if you would rather not remember which one a setting is in.
-| **Entries** | Which of the four modes the menu offers | — |
+| **Entries** | Which of the four modes the menu offers, and folders of your own | — |
 | **Shape** | Window corner and border, the selected entry's pill and ring | Corners of the window, header, thumbnails and search field; window and thumbnail borders |
 | **Tags** | — | Install [wallreco](https://github.com/tungsten-w/wallreco), or run it to tag new wallpapers and recompute the old ones |
 | **Motion** | Animations on/off, speed, bounce, selection lift, and each duration on its own | The same, plus the grid's thumbnail stagger |
@@ -298,12 +265,54 @@ written before the split is carried over rather than half reset: a `menu` half
 the file has never heard of starts as a copy of the knob it used to be, so
 upgrading leaves both windows looking exactly as they did.
 
+**Folders of your own** are extra entries in the mode menu, added under
+**Entries** in the menu's own panel. Point one at any directory — a series, a
+game, a photographer — give it a name and a Nerd Font glyph, and it sits beside
+Dark and Light with the same switch, so a collection you only want in December
+can be put away without being typed in again next year. The thumbnail grid, the
+cache and the tag search all work there unchanged.
+
+*Add* puts one in the menu and drops you **straight into its name**; <kbd>Enter</kbd>
+keeps what you typed and moves to the next line, <kbd>Esc</kbd> leaves it. Each
+line says what it wants — *what it is called in the menu*, *where your images are*
+— because a row that only says `empty` tells you nothing about how to stop it
+being so.
+
+**The path line shows you what is really there**, the way a file manager does.
+Start typing and the directories that exist under it are listed and filtered as
+you go; <kbd>Tab</kbd> goes into the one under the cursor, arrows look around.
+Only folders are offered — the images inside would bury the one thing you are
+looking for — and hidden ones stay hidden until you type a leading dot. The panel
+has no file dialog and no clipboard, so a path is typed; typed blind it gets a
+typo in it, and a typo only shows up much later as a menu entry that opens on
+nothing.
+
+A folder with no path stays out of the menu whatever its switch says, and the row
+says so rather than looking finished.
+
+Unlike `dark/` and `light/`, such a folder is neither: the same directory can
+hold both. So the picker asks once you have chosen an image, and that answer is
+what flips the desktop.
+
+The menu answers with the **path itself** rather than with a name, which is why
+`lumen` needs to know nothing about your categories — it opens the grid on
+whatever it was handed. The rofi fallback cannot ask a follow-up question, so it
+keeps its four entries; your folders live in the Quickshell menu only. They are
+also left out of presets on purpose: a path on your disk is not a look, and a
+preset carrying one would rewrite a stranger's menu with folders they do not have.
+
 **Presets** are whole configurations you can swap between. Each one is a single
 JSON file in `~/.config/lumen/presets`, shaped exactly like `settings.json`
 itself — so a preset is something you can read, hand-edit, keep in a dotfiles
 repo, or send to someone who liked your setup. *Save this configuration* asks for
 a name and writes all seventy four values — both windows' halves; *Apply* puts
 them back.
+
+**A dot and a coloured name mark the preset you are on.** It is compared, not
+remembered: the row lights up whenever your settings already hold everything that
+file does — applying it would change nothing — and goes out the moment you move a
+slider it covers. More than one row can be lit at once, and that is honest: a
+colours-only preset and a whole one can both be what you have.
 
 `Default` is not a file: it is the original rofi measurements, which is what
 makes it the one preset that can never go missing.
@@ -452,12 +461,63 @@ sweeps out the ones whose wallpaper is gone.
 
 ##  Installation
 
-The three lines at the top of this file are the short version. In full:
+### The script — Arch and CachyOS
+
+```bash
+git clone https://github.com/tungsten-w/lumen.git
+cd lumen
+./install/install.sh
+```
+
+Everything it asks can be answered with Enter:
+
+1. **Install `gum`, and an AUR helper** — only if you have neither. gum draws
+   the prompts; without it they are plain text and the run carries on.
+2. **Which optional pieces** you want — Noctalia theming, Spotify recolouring.
+   Space to pick, Enter to move on.
+3. **Which version** to build — the latest release, or `main`.
+4. **Where you keep your wallpapers.** Anywhere is fine: it makes `dark/`,
+   `light/` and `season-time/` there. If that is not `~/Pictures/Wallpapers`, it
+   points that path at your folder, since it is the only one the binary knows.
+5. **Whether to move anything in the way** — only if there is. A folder with
+   files in it is never deleted: it offers, and refuses to do it unattended.
+
+Then it installs the dependencies, builds with `cargo install`, and links
+`quickshell/lumen` and the two rofi themes out of the checkout.
+
+```bash
+./install/install.sh --dry-run    # print every step, change nothing
+```
+
+**Start with that.** It walks the whole script and prints every command it would
+run, without touching a file.
+
+| Flag | |
+|---|---|
+| `--dry-run` | Print every step. Change nothing. |
+| `--yes` | Take every default, ask nothing. |
+| `--ref REF` | Build this tag, branch or commit. |
+| `--src DIR` | Keep the checkout somewhere else. |
+
+Run it again to update — every step notices what is already done:
+
+```bash
+git -C ~/.local/share/lumen pull && ~/.local/share/lumen/install/install.sh
+```
+
+Every step it takes, every path it touches and how to undo each one is written
+out in **[install/README.md](install/README.md)**.
+
+### By hand — any distribution
 
 <details>
 <summary><b>Binary or source</b>, the keybind, and linking the picker's config &nbsp;<i>(click to unfold)</i></summary>
 
 <br>
+
+You will need these on your `PATH` first: `awww`, `matugen`, `pywal`,
+`imagemagick`, `quickshell`, `rofi`, `jq`, plus a Nerd Font and Comfortaa. The
+[dependency table](#dependencies) above says what each is for.
 
 ### Option 1 — prebuilt binary (recommended)
 
@@ -556,13 +616,15 @@ Part of my dotfiles: [tungsten-w/.config](https://github.com/tungsten-w/.config)
 <br>
 
 - [ ] Config file for custom paths (drop the hard-coded `~/Pictures/Wallpapers`)
-- [ ] Proper `install.sh` <--- (im working on it ( ˘͈ ᵕ ˘͈♡))
-- [ ] Finish the wallpaper recognition script
-- [x] Transitions
-- [x] Settings panel (Ctrl+/`lumen --settings`/settings in the search bar)
+- [ ] Release it on the AUR
+- [ ] make a video about the project 
+- [ ] create your own wallpaper folder
+- [x] Finish the wallpaper recognition script (see [wallreco](https://github.com/tungsten-w/wallreco))
+- [x] Settings panel (Ctrl+/lumen --settings/settings in the search bar)
 - [x] use rust instead of bash
 - [x] Quickshell
-- [ ] Release it on the AUR 
+- [x] Proper [`install.sh`](install/README.md) (Arch and CachyOS)
+
 
 </details>
 

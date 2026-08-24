@@ -54,6 +54,24 @@ fn restore_current_wallpaper() {
     }
 }
 
+/// Turns a `~` into your home.
+///
+/// The settings panel keeps a folder's path exactly as it was typed, because
+/// `~/Pictures/anime` is what you want to read back and what still means
+/// something on another machine. Nothing can open it, though: to the filesystem
+/// that is a directory literally called `~`, and asking for it fails with
+/// NotFound rather than with anything that reads like a mistake.
+///
+/// Done here rather than in the QML so it covers a settings file edited by hand
+/// too — which the README invites you to do.
+fn expand_home(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => home_dir().join(rest),
+        None if path == "~" => home_dir(),
+        None => PathBuf::from(path),
+    }
+}
+
 fn parallelism() -> usize {
     thread::available_parallelism()
         .map(|n| n.get())
@@ -311,6 +329,31 @@ fn pick_with_quickshell(config: &Path, dir: &Path) -> Option<PathBuf> {
     // Unlike rofi, which can only echo the line it was given, the Quickshell
     // picker answers with the full path — so wallpapers in sub-directories work.
     Some(PathBuf::from(selected))
+}
+
+/// The thumbnail grid for one of your own folders, which answers with the mode
+/// as well as the wallpaper.
+///
+/// A folder of your own has no dark or light about it — the same directory can
+/// hold both — so the picker asks once you have chosen, and prefixes its answer
+/// with what you said. rofi cannot ask anything, which is why your folders are
+/// not in its menu at all.
+fn pick_from_folder(frontend: &Frontend, dir: &Path) -> Option<(PathBuf, bool)> {
+    let Frontend::Quickshell(config) = frontend else {
+        eprintln!("Erreur : les dossiers personnels sont dessinés par Quickshell, et `qs` manque.");
+        return None;
+    };
+
+    let list = items_json(&require_entries(dir));
+    let answer = run_quickshell(config, "folder", Some(&list))?;
+    if answer.is_empty() {
+        std::process::exit(0);
+    }
+
+    // `dark:` or `light:`, then the path. Neither prefix holds a colon, so the
+    // first one is the separator and the rest is the path however it is spelt.
+    let (mode, path) = answer.split_once(':')?;
+    Some((PathBuf::from(path), mode == "dark"))
 }
 
 /// apply a random wallpaper (season/hour)
@@ -592,12 +635,20 @@ const ICON_LIGHT: char = '\u{f522}';
 const ICON_HEURE: char = '\u{f1803}';
 const ICON_SAISON: char = '\u{f1a79}';
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 enum Mode {
     Dark,
     Light,
     Heure,
     Saison,
+    /// A folder of your own, added in the settings panel and shown in the mode
+    /// menu beside the four above.
+    ///
+    /// The menu answers with the path itself rather than with a name, so this
+    /// binary never has to know what your categories are — it opens the picker
+    /// on whatever it was handed. That is the whole of the feature on this side:
+    /// no settings file to read, no format to keep in step with the QML.
+    Folder(PathBuf),
 }
 
 impl Mode {
@@ -605,6 +656,13 @@ impl Mode {
     /// glyph; the Quickshell menu answers with a name, which is what makes its
     /// QML readable. Both spellings are accepted here.
     fn parse(answer: &str) -> Option<Mode> {
+        // Everything after the first colon is the path, colons and all: only the
+        // prefix is ours to read.
+        if let Some(path) = answer.strip_prefix("folder:")
+            && !path.is_empty()
+        {
+            return Some(Mode::Folder(expand_home(path)));
+        }
         match answer {
             "dark" => Some(Mode::Dark),
             "light" => Some(Mode::Light),
@@ -987,6 +1045,12 @@ fn main() {
         Some(Mode::Heure) => apply_time_of_day(),
         // Saison — random, light
         Some(Mode::Saison) => apply_season(),
+        // One of your own folders — the grid, then the mode you asked for.
+        Some(Mode::Folder(dir)) => {
+            if let Some((wp, dark)) = pick_from_folder(&frontend, &dir) {
+                apply_all(&wp, dark);
+            }
+        }
         // Cancelled.
         None => {}
     }
@@ -1091,6 +1155,76 @@ color_scheme           = Comfy
         // A cancelled prompt is empty in both cases.
         assert_eq!(Mode::parse(""), None);
         assert_eq!(Mode::parse("whatever"), None);
+    }
+
+    #[test]
+    fn a_tilde_becomes_your_home() {
+        let home = home_dir();
+        assert_eq!(expand_home("~/Pictures/anime"), home.join("Pictures/anime"));
+        assert_eq!(expand_home("~"), home);
+        // Only a leading `~/` is ours: these are paths, not shell words.
+        assert_eq!(expand_home("/srv/~/x"), PathBuf::from("/srv/~/x"));
+        assert_eq!(expand_home("~notauser/x"), PathBuf::from("~notauser/x"));
+        assert_eq!(expand_home("/home/you/x"), PathBuf::from("/home/you/x"));
+    }
+
+    #[test]
+    fn a_folder_from_the_panel_is_openable() {
+        // What the panel stores, and what the menu therefore answers with. It
+        // has to come back out as something read_dir can actually open.
+        let answer = "folder:~/Pictures/anime/";
+        let Some(Mode::Folder(dir)) = Mode::parse(answer) else {
+            panic!("not parsed as a folder");
+        };
+        assert!(dir.is_absolute(), "{} is not absolute", dir.display());
+        assert!(!dir.to_string_lossy().contains('~'));
+        assert_eq!(dir, home_dir().join("Pictures/anime/"));
+    }
+
+    #[test]
+    fn mode_parses_a_folder_of_your_own() {
+        assert_eq!(
+            Mode::parse("folder:/home/you/Pictures/anime"),
+            Some(Mode::Folder(PathBuf::from("/home/you/Pictures/anime")))
+        );
+
+        // A path may hold colons, spaces and a `#` — wallpaper folders in this
+        // collection do. Only the first colon is ours.
+        assert_eq!(
+            Mode::parse("folder:/home/you/Pictures/odd: name/#red"),
+            Some(Mode::Folder(PathBuf::from("/home/you/Pictures/odd: name/#red")))
+        );
+
+        // Nothing after the prefix is not a folder.
+        assert_eq!(Mode::parse("folder:"), None);
+
+        // And the four the menu has always answered are untouched.
+        assert_eq!(Mode::parse("dark"), Some(Mode::Dark));
+        assert_eq!(Mode::parse("season"), Some(Mode::Saison));
+        assert_eq!(Mode::parse(&ICON_DARK.to_string()), Some(Mode::Dark));
+    }
+
+    #[test]
+    fn a_folder_answer_carries_the_mode_and_keeps_the_path_whole() {
+        // What pick_from_folder splits: the picker prefixes its answer.
+        let split = |answer: &str| -> Option<(PathBuf, bool)> {
+            let (mode, path) = answer.split_once(':')?;
+            Some((PathBuf::from(path), mode == "dark"))
+        };
+
+        assert_eq!(
+            split("dark:/home/you/a.png"),
+            Some((PathBuf::from("/home/you/a.png"), true))
+        );
+        assert_eq!(
+            split("light:/home/you/a.png"),
+            Some((PathBuf::from("/home/you/a.png"), false))
+        );
+        // A wallpaper named with a colon still arrives whole.
+        assert_eq!(
+            split("dark:/home/you/10:30 sunset-#orange.png"),
+            Some((PathBuf::from("/home/you/10:30 sunset-#orange.png"), true))
+        );
     }
 
     #[test]
