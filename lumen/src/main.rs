@@ -583,7 +583,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
                     }
                     None => thread::sleep(Duration::from_secs(3)),
                 }
-                let _ = Command::new("spicetify").arg("watch").status();
+                let _ = Command::new("spicetify").arg("reload").status();
             }
         }));
     }
@@ -1192,7 +1192,9 @@ color_scheme           = Comfy
         // collection do. Only the first colon is ours.
         assert_eq!(
             Mode::parse("folder:/home/you/Pictures/odd: name/#red"),
-            Some(Mode::Folder(PathBuf::from("/home/you/Pictures/odd: name/#red")))
+            Some(Mode::Folder(PathBuf::from(
+                "/home/you/Pictures/odd: name/#red"
+            )))
         );
 
         // Nothing after the prefix is not a folder.
