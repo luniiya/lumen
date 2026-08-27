@@ -593,6 +593,16 @@ early: Noctalia writes Spotify's colors from its own template three seconds in.
 `lumen` now waits for that file to actually be rewritten before reloading, rather
 than for a duration it guessed.
 
+**And then it asked twice.** Live reload needs a connection to Spotify's DevTools.
+The first `spicetify reload` after Spotify starts does not reload anything: it
+turns DevTools on, restarts Spotify once, and says on stdout to run the command
+again. Both passes exit 0 and neither takes a flag, so the exit code cannot tell
+them apart — which meant the first wallpaper of every session left Spotify on the
+old palette, looking exactly like the command being broken. `lumen` now reads
+what the run actually did and asks a second time when it has to. Exactly once: a
+run that finds no connection restarts Spotify to make one, so retrying in a loop
+would be a loop of restarts.
+
 **The thumbnail cache knows when it is stale.** Not only by timestamp: it reads
 the PNG header of each thumbnail and regenerates any that were built at an older,
 larger size.

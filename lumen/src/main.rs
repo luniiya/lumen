@@ -402,6 +402,79 @@ fn spicetify_colors() -> Option<PathBuf> {
     colors.is_file().then_some(colors)
 }
 
+/// What a run of `spicetify reload` actually did.
+///
+/// Live reload needs a connection to Spotify's DevTools. The first run after
+/// Spotify starts — and any run after Spotify has updated itself — does not
+/// reload anything: it turns DevTools on, restarts Spotify once, and says on
+/// stdout to run the command again. Both passes exit 0 and neither takes a
+/// flag, so the text is the only thing that tells them apart.
+///
+/// Left unread, that meant the first wallpaper of every session did nothing at
+/// all to Spotify, which looks exactly like the command being broken.
+///
+/// From `spicetify-live_reload`, which is a fork: the wording is matched on the
+/// shortest distinctive part of each line rather than on the whole of it.
+#[derive(PartialEq, Debug)]
+enum Reload {
+    /// The colours are in Spotify.
+    Pushed,
+    /// It only set the connection up, and restarted Spotify doing so.
+    SetUp,
+    /// Neither — an older spicetify, a failure, an empty run.
+    Unclear,
+}
+
+fn read_reload(said: &str) -> Reload {
+    if said.contains("Reloaded theme colors") {
+        Reload::Pushed
+    } else if said.contains("run this command again") {
+        Reload::SetUp
+    } else {
+        Reload::Unclear
+    }
+}
+
+/// Pushes the new colours into Spotify, restarting it at most once.
+///
+/// Asks a second time when the first run only set the connection up. Exactly
+/// once: a run that finds no live connection restarts Spotify to make one, so
+/// asking again in a loop would be a loop of restarts rather than a retry.
+fn reload_spotify() {
+    let Ok(first) = Command::new("spicetify").arg("reload").output() else {
+        eprintln!("spicetify introuvable.");
+        return;
+    };
+    if read_reload(&String::from_utf8_lossy(&first.stdout)) != Reload::SetUp {
+        return;
+    }
+
+    // Spotify is coming back up. The DevTools connection is not there the
+    // instant the process is, so the wait is for the connection rather than
+    // for the process — measured at a couple of seconds on this machine.
+    wait_for_process("spotify", Duration::from_secs(20));
+    thread::sleep(Duration::from_secs(3));
+
+    let Ok(again) = Command::new("spicetify").arg("reload").output() else {
+        return;
+    };
+    if read_reload(&String::from_utf8_lossy(&again.stdout)) != Reload::Pushed {
+        eprintln!("spicetify n'a pas rechargé les couleurs; Spotify les aura au prochain fond.");
+    }
+}
+
+/// Blocks until `name` is running, and says whether it turned up.
+fn wait_for_process(name: &str, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if is_running(name) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    false
+}
+
 /// Blocks until `path` has been written since `since`, and says whether it was.
 fn wait_for_write(path: &Path, since: SystemTime, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
@@ -583,7 +656,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
                     }
                     None => thread::sleep(Duration::from_secs(3)),
                 }
-                let _ = Command::new("spicetify").arg("reload").status();
+                reload_spotify();
             }
         }));
     }
@@ -1090,6 +1163,30 @@ mod tests {
         for h in 22..24 {
             assert_eq!(moment_for_hour(h), "night");
         }
+    }
+
+    #[test]
+    fn reload_output_is_read_correctly() {
+        // Verbatim from the strings inside `spicetify vbeta-live-reload`. One
+        // line each on purpose: a `\` continuation in a Rust literal eats the
+        // indentation of the next line as well, which welded "run" to "this" and
+        // left this test checking a sentence no spicetify would ever print.
+        let pushed = "success  Reloaded theme colors without restarting Spotify";
+        let set_up = "Applied theme. Spotify is now set up for live reload; run this command again next time to update colors without restarting.";
+        let restarting = " No live connection to Spotify found. Enabling DevTools and restarting once to set it up...";
+
+        assert_eq!(read_reload(pushed), Reload::Pushed);
+        assert_eq!(read_reload(set_up), Reload::SetUp);
+        // The whole first pass, both lines together, reads the same way.
+        assert_eq!(read_reload(&format!("{restarting}\n{set_up}")), Reload::SetUp);
+
+        // The two must never be confused: the whole point is asking again after
+        // one of them and not after the other.
+        assert_ne!(read_reload(pushed), read_reload(set_up));
+
+        // An older spicetify with no live reload at all, and a silent run.
+        assert_eq!(read_reload("Applied theme"), Reload::Unclear);
+        assert_eq!(read_reload(""), Reload::Unclear);
     }
 
     #[test]
