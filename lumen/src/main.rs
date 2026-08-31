@@ -1,7 +1,7 @@
 use chrono::{Datelike, Local, Timelike};
 use rand::seq::SliceRandom;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,9 +10,10 @@ use std::time::{Duration, SystemTime};
 
 /// Largest edge of a generated thumbnail, in pixels.
 ///
-/// wallpaper.rasi draws `element-icon` at 340px logical; the display runs at
-/// scale 1.33, so 453 physical pixels is all rofi can ever show. Generating at
-/// 900 like the original made rofi decode ~3x the pixels it needed.
+/// The picker draws a thumbnail's icon box at 340px logical by default — see
+/// Layout → Thumbnails → Zoom — and a display at scale 1.33 needs 453 physical
+/// pixels of that at most. 512 leaves room for a higher zoom or a denser
+/// screen without decoding pixels no window on this machine will ever show.
 const THUMB_MAX_EDGE: u32 = 512;
 
 /// awww is told `--transition-duration 0.7`, so that is exactly how long the
@@ -27,9 +28,30 @@ fn home_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").expect("HOME n'est pas défini"))
 }
 
-/// Where every window looks for the wallpaper that is currently up: the picker's
-/// header, the backdrop behind the mode menu, and both rofi themes.
+/// Where every window looks for the wallpaper that is currently up: the
+/// picker's header, and the backdrop behind the mode menu. Always a flat
+/// raster, whatever the source was — a GIF is stored here too, first frame
+/// only. The real file, GIF or not, is what `current_wallpaper_path` below
+/// hands to Quickshell so its backdrop can play one instead of freezing it.
 const CURRENT_WALLPAPER: &str = "/tmp/current_wallpaper.png";
+
+/// The wallpaper actually on screen, resolved from the symlink `apply_all`
+/// keeps in `Pictures/Wallpapers` — canonicalised, so a relative or nested
+/// symlink still comes back as one absolute, real path.
+///
+/// This is the file Quickshell is handed for the backdrop, kept apart from
+/// `CURRENT_WALLPAPER` on purpose: that one is always a flat `.png`, which is
+/// what `Image` alone can ever draw, while this keeps the true extension — a
+/// GIF stays a GIF — so the Quickshell side can tell the two apart and play
+/// the one that moves.
+///
+/// `None` for a symlink that is missing, dangling, or points outside a
+/// filesystem this process can see — a fresh install, or a wallpaper deleted
+/// since — and that is not an error: the caller simply has nothing extra to
+/// hand over, the same as before this existed.
+fn current_wallpaper_path(link: &Path) -> Option<PathBuf> {
+    fs::canonicalize(link).ok()
+}
 
 /// Puts `CURRENT_WALLPAPER` back after a reboot.
 ///
@@ -116,7 +138,7 @@ fn find_images(dir: &Path, exclude: &Path) -> Vec<PathBuf> {
 /// Reads `(width, height)` straight out of a PNG's IHDR chunk.
 ///
 /// Used to spot thumbnails left over from an older, larger `THUMB_MAX_EDGE` so
-/// they get regenerated instead of slowing rofi down forever.
+/// they get regenerated instead of the grid decoding them at full size forever.
 fn png_dimensions(path: &Path) -> Option<(u32, u32)> {
     let mut header = [0u8; 24];
     fs::File::open(path).ok()?.read_exact(&mut header).ok()?;
@@ -276,59 +298,18 @@ fn require_entries(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
     entries
 }
 
-/// apply a (dark/light) wallpaper with rofi picker
-fn pick_with_rofi(dir: &Path) -> Option<PathBuf> {
-    let entries = require_entries(dir);
-
-    // rofi selection
-    let mut input = String::with_capacity(entries.len() * 128);
-    for (img, thumb) in &entries {
-        let Some(file_name) = img.file_name() else {
-            continue;
-        };
-        input.push_str(&file_name.to_string_lossy());
-        input.push_str("\0icon\x1f");
-        input.push_str(&thumb.to_string_lossy());
-        input.push('\n');
-    }
-
-    let mut child = Command::new("rofi")
-        .args([
-            "-dmenu",
-            "-p",
-            "~ Select a wallpaper ~  ⏾ ",
-            "-show-icons",
-            "-icon-theme",
-            "Papirus",
-            "-theme",
-        ])
-        .arg(home_dir().join(".config/rofi/wallpaper.rasi"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .ok()?;
-
-    child.stdin.take()?.write_all(input.as_bytes()).ok()?;
-    let output = child.wait_with_output().ok()?;
-    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    if selected.is_empty() {
-        std::process::exit(0);
-    }
-    Some(dir.join(selected))
-}
-
-/// apply a (dark/light) wallpaper with the Quickshell picker
-fn pick_with_quickshell(config: &Path, dir: &Path) -> Option<PathBuf> {
+/// Shows the thumbnail grid for `dir` and waits for a wallpaper.
+///
+/// Answers with the full path rather than a bare filename, so wallpapers in
+/// sub-directories work.
+fn pick_with_quickshell(config: &Path, dir: &Path) -> PathBuf {
     let list = items_json(&require_entries(dir));
 
-    let selected = run_quickshell(config, "picker", Some(&list))?;
+    let selected = quickshell_or_die(config, "picker", Some(&list));
     if selected.is_empty() {
         std::process::exit(0);
     }
-    // Unlike rofi, which can only echo the line it was given, the Quickshell
-    // picker answers with the full path — so wallpapers in sub-directories work.
-    Some(PathBuf::from(selected))
+    PathBuf::from(selected)
 }
 
 /// The thumbnail grid for one of your own folders, which answers with the mode
@@ -336,16 +317,10 @@ fn pick_with_quickshell(config: &Path, dir: &Path) -> Option<PathBuf> {
 ///
 /// A folder of your own has no dark or light about it — the same directory can
 /// hold both — so the picker asks once you have chosen, and prefixes its answer
-/// with what you said. rofi cannot ask anything, which is why your folders are
-/// not in its menu at all.
-fn pick_from_folder(frontend: &Frontend, dir: &Path) -> Option<(PathBuf, bool)> {
-    let Frontend::Quickshell(config) = frontend else {
-        eprintln!("Erreur : les dossiers personnels sont dessinés par Quickshell, et `qs` manque.");
-        return None;
-    };
-
+/// with what you said.
+fn pick_from_folder(config: &Path, dir: &Path) -> Option<(PathBuf, bool)> {
     let list = items_json(&require_entries(dir));
-    let answer = run_quickshell(config, "folder", Some(&list))?;
+    let answer = quickshell_or_die(config, "folder", Some(&list));
     if answer.is_empty() {
         std::process::exit(0);
     }
@@ -461,6 +436,76 @@ fn reload_spotify() {
     if read_reload(&String::from_utf8_lossy(&again.stdout)) != Reload::Pushed {
         eprintln!("spicetify n'a pas rechargé les couleurs; Spotify les aura au prochain fond.");
     }
+}
+
+/// Where Brave reads a managed policy from.
+///
+/// Root owns this file, and `lumen` runs from a keybind where a sudo prompt has
+/// no terminal to appear in — so it is written only once someone has handed it
+/// over, with `sudo chown $USER` on it. Silence when that has not been done is
+/// deliberate: a wallpaper change is not the place to start asking for a
+/// password.
+const BRAVE_POLICY: &str = "/etc/brave/policies/managed/color.json";
+
+/// The colour pywal took from the wallpaper, as `#rrggbb`.
+///
+/// pywal rather than matugen because `wal` runs on every change whatever the
+/// picker has been told to draw itself from, and because this side of `lumen`
+/// deliberately knows nothing about settings.json.
+fn wal_background() -> Option<String> {
+    let raw = fs::read_to_string(home_dir().join(".cache/wal/colors.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let colour = json.get("special")?.get("background")?.as_str()?;
+    (colour.len() == 7 && colour.starts_with('#')).then(|| colour.to_string())
+}
+
+/// The policy Brave is handed, for one colour.
+fn brave_policy(colour: &str) -> String {
+    // `BrowserColorScheme` is kept because it costs nothing and was already in
+    // the file — though it does not appear in the binary's policy names the way
+    // `BrowserThemeColor` does, so it may well be ignored.
+    format!("{{\"BrowserThemeColor\": \"{colour}\", \"BrowserColorScheme\": \"device\"}}\n")
+}
+
+/// Repaints a running Brave to match the wallpaper, without closing anything.
+///
+/// Brave has no theme command — but Chromium reads enterprise policy out of
+/// /etc/brave/policies/managed, and `--refresh-platform-policy` tells a running
+/// instance to read it again: a second process finds the first through
+/// Chromium's ProcessSingleton, passes the message and exits.
+/// `--no-startup-window` stops it opening anything on the way. The window you
+/// are looking at never closes, no tab is lost, and it takes about a tenth of a
+/// second.
+///
+/// Only the accent is ours to set. This is Material You seeded from one colour,
+/// not a stylesheet.
+fn reload_brave() {
+    if !is_running("brave") {
+        return;
+    }
+    let Some(colour) = wal_background() else {
+        return;
+    };
+
+    let wanted = brave_policy(&colour);
+    // Nothing to announce when nothing changed, and a policy refresh is not
+    // free — it makes every open window repaint.
+    if fs::read_to_string(BRAVE_POLICY).is_ok_and(|held| held == wanted) {
+        return;
+    }
+    if fs::write(BRAVE_POLICY, &wanted).is_err() {
+        eprintln!(
+            "Brave : {BRAVE_POLICY} n'est pas accessible en écriture.\n\
+             Une fois pour toutes : sudo chown $USER {BRAVE_POLICY}"
+        );
+        return;
+    }
+
+    let _ = Command::new("brave")
+        .args(["--refresh-platform-policy", "--no-startup-window"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Blocks until `name` is running, and says whether it turned up.
@@ -591,10 +636,12 @@ fn apply_all(wallpaper: &Path, dark: bool) {
             if !status.map(|s| s.success()).unwrap_or(false) {
                 eprintln!("Erreur pywal.");
             }
+            // Follows `wal` because it reads what `wal` has just written.
+            reload_brave();
         }));
     }
 
-    // Copy /tmp (thumbnails for hyprpanel/rofi/hyprlock...)
+    // Copy /tmp (thumbnails for hyprpanel/hyprlock...)
     {
         let wallpaper = wallpaper.to_path_buf();
         handles.push(thread::spawn(move || {
@@ -616,6 +663,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
                 .arg(home_dir().join(".config/matugen/config.toml"))
                 .args(["--prefer", "saturation", "-q"])
                 .status();
+
         }));
     }
 
@@ -700,13 +748,8 @@ fn apply_all(wallpaper: &Path, dark: bool) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// MAIN MENU (QUICKSHELL / ROFI)
+// MAIN MENU
 // ══════════════════════════════════════════════════════════════
-
-const ICON_DARK: char = '\u{f4ee}';
-const ICON_LIGHT: char = '\u{f522}';
-const ICON_HEURE: char = '\u{f1803}';
-const ICON_SAISON: char = '\u{f1a79}';
 
 #[derive(Clone, PartialEq, Debug)]
 enum Mode {
@@ -725,9 +768,8 @@ enum Mode {
 }
 
 impl Mode {
-    /// rofi can only echo back the line it was handed, so it answers with the
-    /// glyph; the Quickshell menu answers with a name, which is what makes its
-    /// QML readable. Both spellings are accepted here.
+    /// The menu answers with a plain name, which is what makes its QML
+    /// readable — this is the only spelling there has ever been to accept.
     fn parse(answer: &str) -> Option<Mode> {
         // Everything after the first colon is the path, colons and all: only the
         // prefix is ours to read.
@@ -741,45 +783,39 @@ impl Mode {
             "light" => Some(Mode::Light),
             "time" => Some(Mode::Heure),
             "season" => Some(Mode::Saison),
-            _ => match answer.chars().next() {
-                Some(ICON_DARK) => Some(Mode::Dark),
-                Some(ICON_LIGHT) => Some(Mode::Light),
-                Some(ICON_HEURE) => Some(Mode::Heure),
-                Some(ICON_SAISON) => Some(Mode::Saison),
-                _ => None,
-            },
+            _ => None,
         }
     }
 }
 
-/// Which of the two front-ends draws the prompts.
-enum Frontend {
-    /// The Quickshell config to run, i.e. the `shell.qml` of `quickshell/lumen`.
-    Quickshell(PathBuf),
-    Rofi,
-}
+/// Finds `shell.qml`, or says why it cannot and stops.
+///
+/// Quickshell draws every prompt lumen has — the menu, the picker, the settings
+/// panel — so a config that cannot be found, or a `qs` that is not on the PATH,
+/// leaves nothing left to try.
+fn quickshell_config() -> PathBuf {
+    let candidates = [
+        std::env::var_os("LUMEN_QS_CONFIG").map(PathBuf::from),
+        Some(home_dir().join(".config/quickshell/lumen/shell.qml")),
+        // Running straight from a clone of the dotfiles repository.
+        Some(home_dir().join(".config/lumen/quickshell/lumen/shell.qml")),
+    ];
 
-impl Frontend {
-    /// Quickshell as soon as `qs` and the config are both installed, rofi
-    /// otherwise. `LUMEN_FRONTEND=rofi` pins the old front-end, which is also
-    /// what happens automatically if `qs` ever fails to start.
-    fn detect() -> Frontend {
-        if std::env::var("LUMEN_FRONTEND").as_deref() == Ok("rofi") {
-            return Frontend::Rofi;
-        }
+    let Some(config) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
+        eprintln!("Erreur : aucune configuration Quickshell trouvée.");
+        eprintln!(
+            "Voir « Installation » dans le README, ou pointez LUMEN_QS_CONFIG sur shell.qml."
+        );
+        std::process::exit(1);
+    };
 
-        let candidates = [
-            std::env::var_os("LUMEN_QS_CONFIG").map(PathBuf::from),
-            Some(home_dir().join(".config/quickshell/lumen/shell.qml")),
-            // Running straight from a clone of the dotfiles repository.
-            Some(home_dir().join(".config/lumen/quickshell/lumen/shell.qml")),
-        ];
-
-        match candidates.into_iter().flatten().find(|path| path.is_file()) {
-            Some(config) if has_command("qs") => Frontend::Quickshell(config),
-            _ => Frontend::Rofi,
-        }
+    if !has_command("qs") {
+        eprintln!("Erreur : `qs` (Quickshell) est introuvable sur le PATH.");
+        eprintln!("Voir « Installation » dans le README pour l'installer.");
+        std::process::exit(1);
     }
+
+    config
 }
 
 fn has_command(name: &str) -> bool {
@@ -797,11 +833,11 @@ fn runtime_file(name: &str) -> PathBuf {
         .join(format!("lumen-{name}-{}", std::process::id()))
 }
 
-/// Shows one Quickshell prompt and waits for it, the way rofi was waited for.
+/// Shows one Quickshell prompt and waits for it.
 ///
 /// `Some("")` is a cancelled prompt — Escape, or a click outside the window.
-/// `None` means `qs` itself never got as far as answering, and the caller should
-/// fall back to rofi rather than leave the user without a picker.
+/// `None` means `qs` itself never got as far as answering; see
+/// `quickshell_or_die`, which is what every caller actually uses.
 fn run_quickshell(config: &Path, mode: &str, items: Option<&str>) -> Option<String> {
     let result = runtime_file("result");
     // A leftover answer from an earlier run would be indistinguishable from
@@ -820,6 +856,11 @@ fn run_quickshell(config: &Path, mode: &str, items: Option<&str>) -> Option<Stri
         .arg(config)
         .env("LUMEN_MODE", mode)
         .env("LUMEN_RESULT", &result);
+    // Every window that draws a backdrop wants this, so it goes out on every
+    // launch rather than only the ones that show one.
+    if let Some(path) = current_wallpaper_path(&home_dir().join("Pictures/Wallpapers/current_wallpaper.jpg")) {
+        command.env("LUMEN_CURRENT_WALLPAPER", path);
+    }
     if let Some(path) = &items_file {
         command.env("LUMEN_ITEMS", path);
     }
@@ -838,6 +879,18 @@ fn run_quickshell(config: &Path, mode: &str, items: Option<&str>) -> Option<Stri
         return None;
     }
     Some(answer)
+}
+
+/// `run_quickshell`, with nothing left to fall back to.
+///
+/// A `qs` that will not answer once it is the only front-end there is means the
+/// prompt the user asked for cannot be shown at all — a hard stop with a
+/// message beats a silent do-nothing that looks like the keybind did nothing.
+fn quickshell_or_die(config: &Path, mode: &str, items: Option<&str>) -> String {
+    run_quickshell(config, mode, items).unwrap_or_else(|| {
+        eprintln!("Erreur : Quickshell n'a pas répondu.");
+        std::process::exit(1);
+    })
 }
 
 /// Random wallpaper for the time of day it is, dark once the sun is down.
@@ -905,35 +958,8 @@ fn take_auto_lock() {
 }
 
 /// Shows the mode menu and waits for one of the four entries.
-fn choose_mode(frontend: &Frontend) -> Option<Mode> {
-    if let Frontend::Quickshell(config) = frontend {
-        if let Some(answer) = run_quickshell(config, "menu", None) {
-            return Mode::parse(&answer);
-        }
-        eprintln!("Quickshell n'a pas répondu, retour à rofi.");
-    }
-
-    let menu = format!("{ICON_DARK}\n{ICON_LIGHT}\n{ICON_HEURE}\n{ICON_SAISON}");
-
-    let mut child = Command::new("rofi")
-        .args(["-dmenu", "-theme"])
-        .arg(home_dir().join(".config/rofi/wallpaperchoise.rasi"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("échec du lancement de rofi");
-
-    child
-        .stdin
-        .take()
-        .expect("stdin manquant")
-        .write_all(menu.as_bytes())
-        .expect("échec de l'écriture dans rofi");
-    let output = child
-        .wait_with_output()
-        .expect("échec de l'exécution de rofi");
-
-    Mode::parse(String::from_utf8_lossy(&output.stdout).trim())
+fn choose_mode(config: &Path) -> Option<Mode> {
+    Mode::parse(&quickshell_or_die(config, "menu", None))
 }
 
 /// `lumen --settings` — the settings panel, with the picker beside it as a live
@@ -943,36 +969,14 @@ fn choose_mode(frontend: &Frontend) -> Option<Mode> {
 /// change the wallpaper by accident; the panel writes to
 /// `~/.config/lumen/settings.json` as you move a slider, and both prompts read
 /// it from then on. The same panel opens over a real picker with Ctrl+,.
-fn open_settings(frontend: &Frontend) {
-    let Frontend::Quickshell(config) = frontend else {
-        eprintln!(
-            "Erreur : les réglages sont dessinés par Quickshell, et `qs` ou sa config manque."
-        );
-        eprintln!("Voir « The picker » dans le README pour l'installer.");
-        std::process::exit(1);
-    };
-
+fn open_settings(config: &Path) {
     // The panel has nowhere to write if this is a fresh install.
     let _ = fs::create_dir_all(home_dir().join(".config/lumen"));
 
     let list = items_json(&wallpaper_entries(
         &home_dir().join("Pictures/Wallpapers/dark"),
     ));
-    if run_quickshell(config, "settings", Some(&list)).is_none() {
-        eprintln!("Erreur : Quickshell n'a pas démarré.");
-        std::process::exit(1);
-    }
-}
-
-/// Shows the thumbnail grid for `dir` and waits for a wallpaper.
-fn pick_wallpaper(frontend: &Frontend, dir: &Path) -> Option<PathBuf> {
-    if let Frontend::Quickshell(config) = frontend {
-        if let Some(wallpaper) = pick_with_quickshell(config, dir) {
-            return Some(wallpaper);
-        }
-        eprintln!("Quickshell n'a pas répondu, retour à rofi.");
-    }
-    pick_with_rofi(dir)
+    quickshell_or_die(config, "settings", Some(&list));
 }
 
 /// Deletes thumbnails whose source image is gone (renamed or removed), which
@@ -1064,7 +1068,7 @@ fn main() {
         return;
     }
     if args.first().is_some_and(|a| a == "--settings") {
-        open_settings(&Frontend::detect());
+        open_settings(&quickshell_config());
         return;
     }
     // An unknown flag is a typo, not a wallpaper directory: say so rather than
@@ -1095,24 +1099,18 @@ fn main() {
         .stderr(Stdio::null())
         .spawn();
 
-    let frontend = Frontend::detect();
+    let config = quickshell_config();
 
-    match choose_mode(&frontend) {
+    match choose_mode(&config) {
         // Dark — thumbnail picker
         Some(Mode::Dark) => {
-            if let Some(wp) =
-                pick_wallpaper(&frontend, &home_dir().join("Pictures/Wallpapers/dark"))
-            {
-                apply_all(&wp, true);
-            }
+            let wp = pick_with_quickshell(&config, &home_dir().join("Pictures/Wallpapers/dark"));
+            apply_all(&wp, true);
         }
         // Light — thumbnail picker
         Some(Mode::Light) => {
-            if let Some(wp) =
-                pick_wallpaper(&frontend, &home_dir().join("Pictures/Wallpapers/light"))
-            {
-                apply_all(&wp, false);
-            }
+            let wp = pick_with_quickshell(&config, &home_dir().join("Pictures/Wallpapers/light"));
+            apply_all(&wp, false);
         }
         // Heure — random, dark if night/sunset
         Some(Mode::Heure) => apply_time_of_day(),
@@ -1120,7 +1118,7 @@ fn main() {
         Some(Mode::Saison) => apply_season(),
         // One of your own folders — the grid, then the mode you asked for.
         Some(Mode::Folder(dir)) => {
-            if let Some((wp, dark)) = pick_from_folder(&frontend, &dir) {
+            if let Some((wp, dark)) = pick_from_folder(&config, &dir) {
                 apply_all(&wp, dark);
             }
         }
@@ -1163,6 +1161,19 @@ mod tests {
         for h in 22..24 {
             assert_eq!(moment_for_hour(h), "night");
         }
+    }
+
+    #[test]
+    fn the_brave_policy_is_the_json_brave_expects() {
+        // Byte for byte what was in /etc/brave/policies/managed by hand, so a
+        // run changes the colour and nothing else about the file.
+        assert_eq!(
+            brave_policy("#1c2027"),
+            "{\"BrowserThemeColor\": \"#1c2027\", \"BrowserColorScheme\": \"device\"}\n"
+        );
+        // And it has to parse, or Brave ignores the lot in silence.
+        let held: serde_json::Value = serde_json::from_str(&brave_policy("#100b1b")).unwrap();
+        assert_eq!(held["BrowserThemeColor"], "#100b1b");
     }
 
     #[test]
@@ -1236,22 +1247,40 @@ color_scheme           = Comfy
     }
 
     #[test]
-    fn mode_parses_both_frontends() {
-        // What the Quickshell menu writes.
+    fn mode_parses_what_the_quickshell_menu_writes() {
         assert_eq!(Mode::parse("dark"), Some(Mode::Dark));
         assert_eq!(Mode::parse("light"), Some(Mode::Light));
         assert_eq!(Mode::parse("time"), Some(Mode::Heure));
         assert_eq!(Mode::parse("season"), Some(Mode::Saison));
 
-        // What rofi echoes back.
-        assert_eq!(Mode::parse(&ICON_DARK.to_string()), Some(Mode::Dark));
-        assert_eq!(Mode::parse(&ICON_LIGHT.to_string()), Some(Mode::Light));
-        assert_eq!(Mode::parse(&ICON_HEURE.to_string()), Some(Mode::Heure));
-        assert_eq!(Mode::parse(&ICON_SAISON.to_string()), Some(Mode::Saison));
-
-        // A cancelled prompt is empty in both cases.
+        // A cancelled prompt, and anything that is none of the above.
         assert_eq!(Mode::parse(""), None);
         assert_eq!(Mode::parse("whatever"), None);
+    }
+
+    #[test]
+    fn current_wallpaper_path_resolves_a_real_symlink() {
+        let dir = std::env::temp_dir().join(format!("lumen_link_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let real = dir.join("sunset-#orange.gif");
+        fs::write(&real, b"x").unwrap();
+        let link = dir.join("current_wallpaper.jpg");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        assert_eq!(
+            current_wallpaper_path(&link),
+            Some(fs::canonicalize(&real).unwrap())
+        );
+
+        // A wallpaper renamed or deleted out from under the link.
+        fs::remove_file(&real).unwrap();
+        assert_eq!(current_wallpaper_path(&link), None);
+
+        // No link at all — a fresh install, before anything has been applied.
+        assert_eq!(current_wallpaper_path(&dir.join("nothing_here")), None);
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1300,7 +1329,6 @@ color_scheme           = Comfy
         // And the four the menu has always answered are untouched.
         assert_eq!(Mode::parse("dark"), Some(Mode::Dark));
         assert_eq!(Mode::parse("season"), Some(Mode::Saison));
-        assert_eq!(Mode::parse(&ICON_DARK.to_string()), Some(Mode::Dark));
     }
 
     #[test]

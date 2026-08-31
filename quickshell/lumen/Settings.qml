@@ -189,6 +189,13 @@ Singleton {
                 /// a blurred wallpaper is often too bright to read a field on.
                 property real backdropBlur: 0
                 property real backdropDim: 0
+                /// Whether a GIF wallpaper is shown moving — in the backdrop and,
+                /// for the picker, in the grid's selected thumbnail — or left on
+                /// its first frame the way every other format always was. On by
+                /// default, since that is what shipped first; this is the way
+                /// back for whoever finds it distracting, or would rather not
+                /// spend a decode on a movie nobody but them asked to see.
+                property bool animateGifs: true
                 /// The menu's half of the backdrop: it fills the whole card
                 /// there and only the header here, so the framing that suits one
                 /// rarely suits the other.
@@ -196,6 +203,7 @@ Singleton {
                 property real menuBackdropPosition: 0
                 property real menuBackdropBlur: 0
                 property real menuBackdropDim: 0
+                property bool menuAnimateGifs: true
                 property real entryWidth: 288
                 property real entryHeight: 46.5
                 property real textSize: 16 // font: "Comfortaa 12"
@@ -307,7 +315,9 @@ Singleton {
             backdropPosition: 0,
             backdropBlur: 0,
             backdropDim: 0,
+            animateGifs: true,
             menuBackdropZoom: 1,
+            menuAnimateGifs: true,
             menuBackdropPosition: 0,
             menuBackdropBlur: 0,
             menuBackdropDim: 0,

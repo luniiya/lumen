@@ -28,8 +28,37 @@ Singleton {
     readonly property int iconSize: Settings.layout.iconSize
 
     /// The wallpaper currently on screen. `lumen` copies it here on every
-    /// change, and both rasi themes use it as `background-image`.
+    /// change, and both rasi themes use it as `background-image`. Always a
+    /// flat raster — a GIF loses its motion on the way in, which is what
+    /// `animatedWallpaper` below is for.
     readonly property url wallpaper: root.fileUrl("/tmp/current_wallpaper.png")
+
+    /// The real wallpaper file, `lumen` reads it once per launch since it never
+    /// changes mid-run, and passes it along however it names the file — a
+    /// `.gif` stays one. Empty before a wallpaper has ever been applied, which
+    /// is exactly when `wallpaper` above has nothing to show either.
+    readonly property string currentWallpaperPath: Quickshell.env("LUMEN_CURRENT_WALLPAPER") ?? ""
+
+    /// Whether `path` is a GIF `lumen` will actually play — which needs both a
+    /// `.gif` on the end of it and the switch in Layout → Wallpaper backdrop
+    /// left on. One function rather than two separate checks scattered across
+    /// the backdrop and the grid, so a `.jpg` and a switched-off setting are
+    /// refused the exact same way everywhere this is asked.
+    function isAnimatableGif(path: string): bool {
+        return Settings.value("layout", "animateGifs") && path.toLowerCase().endsWith(".gif");
+    }
+
+    /// Whether the wallpaper actually on screen is one — the one format `Image`
+    /// cannot animate, and the only one the backdrop plays instead of freezing.
+    readonly property bool wallpaperIsGif: root.isAnimatableGif(root.currentWallpaperPath)
+
+    /// The GIF as a URL `AnimatedImage` can open, through the same escaping
+    /// `wallpaper` gets — this collection tags its files with `#colour` in the
+    /// name, which a raw path would have parsed away as a URL fragment.
+    /// Empty whenever the current wallpaper is not a GIF, which is what keeps
+    /// `AnimatedImage.source` unset — and nothing decoding — the rest of the
+    /// time.
+    readonly property url animatedWallpaper: root.wallpaperIsGif ? root.fileUrl(root.currentWallpaperPath) : ""
 
     /// Turns a filesystem path into a URL an Image can load.
     ///

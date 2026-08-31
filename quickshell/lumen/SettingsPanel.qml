@@ -471,6 +471,7 @@ Item {
             slider("layout", "backdropPosition", "Framing", 0, 1, 0.01, "");
             slider("layout", "backdropBlur", "Blur", 0, 1, 0.01, "");
             slider("layout", "backdropDim", "Dim", 0, 1, 0.01, "");
+            toggle("layout", "animateGifs", "Animate GIFs");
 
             if (!panel.menuScope) {
                 group("Picker window");

@@ -25,6 +25,12 @@ Item {
     /// changes, so it is only built when it is actually asked for.
     readonly property bool frosted: Style.backdrop.blur > 0 || Style.backdrop.dim > 0
 
+    /// Whether the wallpaper actually on screen is a GIF. `Image` only ever
+    /// draws its first frame — this is what makes the strip behind the search
+    /// field, and the card behind the mode menu, show it moving the way it
+    /// really does the moment either one opens.
+    readonly property bool animated: Style.wallpaperIsGif
+
     anchors.fill: area
 
     Image {
@@ -50,10 +56,12 @@ Item {
         // compositor upscales it again, which is visibly softer than rofi.
         sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
 
-        // Hidden while the effect below is drawing it, or it would show through
-        // unblurred underneath.
-        visible: !backdrop.frosted
-        layer.enabled: backdrop.frosted
+        // Hidden once the GIF below has taken over — until then this is its
+        // poster frame, so a slow decode shows a still picture rather than
+        // nothing at all. Hidden the ordinary way too, while the effect below
+        // is drawing it, or it would show through unblurred underneath.
+        visible: !backdrop.frosted && (!backdrop.animated || motion.status !== Image.Ready)
+        layer.enabled: backdrop.frosted && !backdrop.animated
 
         // So that dragging the zoom or the framing reads as moving the image
         // rather than as the window being redrawn under you.
@@ -80,12 +88,68 @@ Item {
         }
     }
 
+    /// The same wallpaper, playing. A separate element rather than one that
+    /// swaps type, because QML elements do not change type at runtime — kept
+    /// cheap for every wallpaper that is not a GIF by leaving `source` empty
+    /// then, which is what stops it decoding a movie nobody asked for.
+    AnimatedImage {
+        id: motion
+
+        // The geometry mirrors `image` above exactly, because the two have to
+        // land on the same pixels while one fades into the other.
+        width: backdrop.width * Style.backdrop.zoom
+        height: implicitWidth > 0 ? width * (implicitHeight / implicitWidth) : backdrop.height
+        fillMode: Image.PreserveAspectFit
+
+        x: (backdrop.width - width) / 2
+        y: Math.min(0, backdrop.height - height) * Style.backdrop.position
+
+        source: backdrop.animated ? Style.animatedWallpaper : ""
+        asynchronous: true
+        cache: false
+        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+
+        // `AnimatedImage.playing` defaults to true, but not here: binding
+        // `sourceSize` to `width` makes it re-decode once layout settles, and
+        // that second decode comes back paused rather than playing — measured,
+        // not guessed, after a real GIF sat on screen not moving. Asserting it
+        // again on every `Ready` is what survives that, and any redecode after.
+        onStatusChanged: if (status === Image.Ready)
+            playing = true
+
+        visible: backdrop.animated && !backdrop.frosted
+        layer.enabled: backdrop.animated && backdrop.frosted
+
+        Behavior on width {
+            NumberAnimation {
+                duration: Style.fadeDuration
+                easing.type: Easing.OutCubic
+            }
+        }
+        Behavior on y {
+            NumberAnimation {
+                duration: Style.fadeDuration
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        opacity: status === Image.Ready ? 1 : 0
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Style.enterDuration
+            }
+        }
+    }
+
     MultiEffect {
-        source: image
-        x: image.x
-        y: image.y
-        width: image.width
-        height: image.height
+        // Whichever of the two is actually the one on screen.
+        readonly property Item drawn: backdrop.animated ? motion : image
+
+        source: drawn
+        x: drawn.x
+        y: drawn.y
+        width: drawn.width
+        height: drawn.height
         visible: backdrop.frosted
 
         blurEnabled: Style.backdrop.blur > 0

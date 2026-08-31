@@ -9,8 +9,8 @@
 # README.md beside this file.
 #
 # It installs the dependencies, puts a checkout somewhere it can be updated
-# from, builds the binary with cargo, links the Quickshell config and the rofi
-# themes, and makes the wallpaper folders wherever you want them.
+# from, builds the binary with cargo, links the Quickshell config, and makes
+# the wallpaper folders wherever you want them.
 #
 # Nothing here is clever. Every step is skipped when it is already done, so
 # running it again is how you update; anything that would overwrite something
@@ -22,10 +22,9 @@ set -euo pipefail
 readonly REPO_URL="https://github.com/tungsten-w/lumen.git"
 readonly DEFAULT_SRC="${XDG_DATA_HOME:-$HOME/.local/share}/lumen"
 
-# What Frontend::detect() looks for, and where the two rasi themes are read
-# from. Both are compiled into the binary, so they are not ours to move.
+# What quickshell_config() looks for. Compiled into the binary, so it is not
+# ours to move.
 readonly QS_LINK="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/lumen"
-readonly ROFI_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rofi"
 
 # `lumen` reads this path and no other. That is why the folder you choose is
 # reached through a link rather than by the binary being told where it is.
@@ -254,7 +253,6 @@ readonly REQUIRED=(
     "pywal|python-pywal16 python-pywal|wal|The classic sixteen colours"
     "imagemagick|imagemagick|magick|Thumbnails, and GIF handling"
     "quickshell|quickshell quickshell-git|qs|The picker and the settings panel"
-    "rofi|rofi rofi-wayland|rofi|The fallback picker"
     "jq|jq|jq|Editing Obsidian's JSON"
     "JetBrains Mono Nerd Font|ttf-jetbrains-mono-nerd|font:JetBrainsMono Nerd Font|The menu glyphs"
     "Comfortaa|ttf-comfortaa|font:Comfortaa|The interface text"
@@ -346,10 +344,10 @@ install_dependencies() {
 }
 
 # ── The checkout ──────────────────────────────────────────────────────
-# The binary is only half of lumen: the Quickshell config and the two rofi
-# themes are files that have to sit where the binary looks for them. So a
-# checkout is kept rather than thrown away, both halves come from it, and
-# updating is `git pull` followed by another run of this script.
+# The binary is only half of lumen: the Quickshell config is a folder of files
+# that has to sit where the binary looks for it. So a checkout is kept rather
+# than thrown away, both halves come from it, and updating is `git pull`
+# followed by another run of this script.
 
 # The repository this script was run from, if it was run from one at all.
 enclosing_clone() {
@@ -545,13 +543,7 @@ link_config() {
     step "Config"
 
     link_into "$SRC/quickshell/lumen" "$QS_LINK" "Quickshell config" ||
-        warn "Quickshell config not linked; lumen will fall back to rofi."
-
-    local theme
-    for theme in wallpaper.rasi wallpaperchoise.rasi; do
-        link_into "$SRC/rofi/$theme" "$ROFI_DIR/$theme" "rofi $theme" ||
-            warn "$theme not linked; the rofi fallback will look wrong."
-    done
+        warn "Quickshell config not linked; lumen has nothing left to draw with."
 }
 
 # ── Done ──────────────────────────────────────────────────────────────

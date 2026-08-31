@@ -639,6 +639,12 @@ OverlayWindow {
                 required property int index
                 required property var modelData
                 readonly property bool current: win.currentIndex === element.index
+                /// Whether the wallpaper *behind* this thumbnail is a GIF
+                /// `lumen` is willing to play — asked of the real path, never
+                /// the cached `.thumb`, which `magick […\[0\]…]` always renders
+                /// down to a flat PNG, and off outright when Layout → Wallpaper
+                /// backdrop's switch is.
+                readonly property bool isGif: Style.isAnimatableGif(element.modelData.path)
 
                 width: Style.picker.elementWidth
                 height: Style.picker.elementHeight
@@ -690,6 +696,8 @@ OverlayWindow {
                     border.color: Colors.borderColor
 
                     Image {
+                        id: poster
+
                         // rofi fits the thumbnail inside a 340x340 icon box and
                         // the element clips it; the visible crop is therefore
                         // zoomed in rather than fitted to the element's shape.
@@ -704,7 +712,43 @@ OverlayWindow {
                         // Device pixels, not logical ones — see WallpaperBackdrop.
                         sourceSize.width: Math.ceil(Style.picker.iconBox * Screen.devicePixelRatio)
                         // Thumbnails decode one after another; each one fades in
-                        // as it arrives instead of popping.
+                        // as it arrives, and it yields once `motion` below has
+                        // taken over — same crossfade as the backdrop's.
+                        opacity: status === Image.Ready && (!element.current || !element.isGif || motion.status !== Image.Ready) ? 1 : 0
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: Style.fadeDuration
+                            }
+                        }
+                    }
+
+                    /// The same thumbnail, playing — but only for the one
+                    /// element that is both selected and a GIF. Every other
+                    /// cell keeps `source` empty, which is what stops a folder
+                    /// of fifty GIFs from decoding fifty movies at once: the
+                    /// cached, static `.thumb` above is what a grid full of
+                    /// them is drawn from, same as it always was.
+                    AnimatedImage {
+                        id: motion
+
+                        anchors.centerIn: parent
+                        width: Style.picker.iconBox
+                        height: Style.picker.iconBox
+                        fillMode: Image.PreserveAspectFit
+
+                        source: element.current && element.isGif ? Style.fileUrl(element.modelData.path) : ""
+                        asynchronous: true
+                        cache: false
+                        sourceSize.width: Math.ceil(Style.picker.iconBox * Screen.devicePixelRatio)
+
+                        // `AnimatedImage.playing` defaults to true, but binding
+                        // `sourceSize` to a size computed from its own layout —
+                        // exactly what this does — makes it redecode once that
+                        // settles, and the redecode comes back paused. See
+                        // WallpaperBackdrop for how this was actually found.
+                        onStatusChanged: if (status === Image.Ready)
+                            playing = true
+
                         opacity: status === Image.Ready ? 1 : 0
                         Behavior on opacity {
                             NumberAnimation {

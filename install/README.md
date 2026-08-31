@@ -19,8 +19,8 @@ git clone https://github.com/tungsten-w/lumen.git && ./lumen/install/install.sh
 ```
 
 Arch and CachyOS only. It installs the dependencies, keeps a checkout it can
-update from, builds the binary with cargo, links the Quickshell config and the
-two rofi themes, and makes the wallpaper folders wherever you want them.
+update from, builds the binary with cargo, links the Quickshell config, and
+makes the wallpaper folders wherever you want them.
 
 Run it again to update — every step notices what is already done.
 
@@ -30,11 +30,12 @@ Run it again to update — every step notices what is already done.
 
 `cargo install` gets you the binary and nothing else, and the binary is only
 half of lumen. The picker and the settings panel are **QML files** that
-Quickshell reads off disk, and the rofi fallback needs its two `.rasi` themes.
-Both are looked for at fixed paths compiled into the binary:
+Quickshell reads off disk — lumen has no other front-end to fall back on, so
+without them there is nothing to draw with at all. They are looked for at
+fixed paths compiled into the binary:
 
 ```rust
-// Frontend::detect(), main.rs
+// quickshell_config(), main.rs
 $LUMEN_QS_CONFIG
 ~/.config/quickshell/lumen/shell.qml
 ~/.config/lumen/quickshell/lumen/shell.qml
@@ -95,7 +96,7 @@ not in your repositories is simply reported and skipped.
 
 ### 4 — Dependencies
 
-Eleven required, two optional (`noctalia`, `spicetify`) offered through a
+Ten required, two optional (`noctalia`, `spicetify`) offered through a
 `gum choose` you can leave empty.
 
 Two things are worth knowing here.
@@ -130,7 +131,6 @@ thinks it installed:
 | pywal | `python-pywal16` `python-pywal` | `wal` | The classic sixteen colours |
 | imagemagick | `imagemagick` | `magick` | Thumbnails, and GIF handling |
 | quickshell | `quickshell` `quickshell-git` | `qs` | The picker and the settings panel |
-| rofi | `rofi` `rofi-wayland` | `rofi` | The fallback picker |
 | jq | `jq` | `jq` | Editing Obsidian's JSON |
 | Nerd Font | `ttf-jetbrains-mono-nerd` | fontconfig | The menu glyphs |
 | Comfortaa | `ttf-comfortaa` | fontconfig | The interface text |
@@ -205,13 +205,11 @@ comes with it instead of being orphaned.
 
 ### 8 — Config
 
-Three symlinks out of the checkout:
+One symlink out of the checkout:
 
 | Link | Target |
 |---|---|
 | `~/.config/quickshell/lumen` | `$SRC/quickshell/lumen` |
-| `~/.config/rofi/wallpaper.rasi` | `$SRC/rofi/wallpaper.rasi` |
-| `~/.config/rofi/wallpaperchoise.rasi` | `$SRC/rofi/wallpaperchoise.rasi` |
 
 A path that is already the right link is left alone. A path that is a link
 somewhere else asks before being repointed. **A real file or folder you wrote is
@@ -235,7 +233,6 @@ is already right.
 | `~/.local/share/lumen` | The checkout, unless `--src` | `rm -rf` |
 | `~/.cargo/bin/lumen` | The binary | `cargo uninstall lumen` |
 | `~/.config/quickshell/lumen` | Symlink | `rm` |
-| `~/.config/rofi/wallpaper*.rasi` | Symlinks | `rm`, then restore any `.bak` |
 | `~/Pictures/Wallpapers` | Folder, or a symlink to yours | `rm` the link |
 | *your wallpaper folder* | The `dark/ light/ season-time/` tree | Yours |
 | System packages | Through `pacman` and the AUR helper | `pacman -Rns` |
@@ -287,7 +284,7 @@ HOME=/tmp/fake ./install/install.sh --yes --src /tmp/fake/src
 | | |
 |---|---|
 | **`lumen: command not found`** | `~/.cargo/bin` is not on your `PATH`. Add `export PATH="$HOME/.cargo/bin:$PATH"` to your shell's rc file. |
-| **The picker is rofi, not the Quickshell one** | `qs` is missing, or `~/.config/quickshell/lumen` is not linked. `lumen` says so on stderr and falls back rather than failing. |
+| **`lumen` errors instead of opening** | `qs` is missing, or `~/.config/quickshell/lumen` is not linked — Quickshell is the only front-end there is, so lumen says so on stderr and stops rather than opening nothing. |
 | **`no package found under: …`** | That dependency is not in your repositories and not in the AUR under the names tried. Install it by hand; the script names it and carries on. |
 | **cargo says `v2.3.1` after checking out a later tag** | The crate version in `Cargo.toml` trails the git tags. Cosmetic — the code is the tag you asked for. |
 | **It refused to touch `~/Pictures/Wallpapers`** | You passed `--yes` and that folder has files in it. Run it again without `--yes` and it will offer to move them. |

@@ -96,8 +96,6 @@ day or the season and never think about it again.
 - **Smooth wallpaper transitions** through [`awww`](https://github.com/LGFae/swww).
 - **Set and forget** — `lumen --time` and `lumen --season` pick for you, with no
   prompt at all, ready for a timer.
-- **rofi is still there** as a fallback, pixel for pixel, for machines without
-  Quickshell.
 - **Written in Rust**, so the whole thing is done in about the time the
   transition takes.
 - **Wallpaper recognition** — a script that reads what is *in* the image
@@ -296,10 +294,9 @@ what flips the desktop.
 
 The menu answers with the **path itself** rather than with a name, which is why
 `lumen` needs to know nothing about your categories — it opens the grid on
-whatever it was handed. The rofi fallback cannot ask a follow-up question, so it
-keeps its four entries; your folders live in the Quickshell menu only. They are
-also left out of presets on purpose: a path on your disk is not a look, and a
-preset carrying one would rewrite a stranger's menu with folders they do not have.
+whatever it was handed. Folders are also left out of presets on purpose: a path
+on your disk is not a look, and a preset carrying one would rewrite a stranger's
+menu with folders they do not have.
 
 **Presets** are whole configurations you can swap between. Each one is a single
 JSON file in `~/.config/lumen/presets`, shaped exactly like `settings.json`
@@ -378,6 +375,24 @@ drew at exactly the window's width, pinned to the top, with nothing else on offe
   floating on it. Both are 0 by default, and at 0 the effect is skipped entirely
   rather than drawn as a no-op.
 
+**A GIF plays there, on by default.** The strip behind the search field, and the
+card behind the mode menu, both draw whatever the current wallpaper actually is —
+and a plain `Image` in Quickshell can only ever show a still frame, whatever
+format it is given. So the moment `lumen` finds the one on screen is a GIF, this
+is what shows it moving instead, in the same box, at the same zoom and framing
+as a photograph would sit in.
+
+**The grid does the same, for the one thumbnail you have selected.** Every other
+cell stays exactly what it always was — the cached, static crop `magick` took of
+frame zero — so a folder of fifty GIFs is fifty cheap PNGs sitting still and one
+that moves once you land on it. Walking the grid starts and stops a GIF as you go
+past it; nothing plays that is not the one under the cursor.
+
+**Animate GIFs**, right under Dim, turns both of the above off at once — back to
+the still first frame everything else already drew, for whoever finds a wallpaper
+moving behind their search field more distracting than charming, or would rather
+not spend a decode on it.
+
 **Blur behind the window**, over in *Color*, is a different thing: the compositor
 frosts what is under the cards — following their rounded corners, and the panel
 as it slides out — while the rest of the screen stays sharp. It only shows through
@@ -393,14 +408,16 @@ to the wallpaper.
 
 </details>
 
-**rofi is still there.** `lumen` falls back to the old themes whenever `qs` or the
-Quickshell config is missing — or if `qs` fails to start — so nothing breaks on a
-machine without Quickshell. To pin it by hand:
+**Quickshell is the only front-end.** `lumen` looks for its config at
+`~/.config/quickshell/lumen/shell.qml`, or wherever the install script's own
+checkout put it; point it somewhere else by hand with:
 
 ```bash
-LUMEN_FRONTEND=rofi lumen        # always rofi
 LUMEN_QS_CONFIG=/path/shell.qml  # a Quickshell config somewhere else
 ```
+
+Missing `qs`, or a config it cannot find, is a hard stop with a message on
+stderr rather than a silent do-nothing.
 
 ---
 
@@ -446,7 +463,6 @@ sweeps out the ones whose wallpaper is gone.
 | [`pywal`](https://github.com/dylanaraps/pywal) | Classic palette generation |
 | `imagemagick` | Thumbnail generation + GIF handling |
 | [`quickshell`](https://quickshell.org) | The picker and the settings panel |
-| `rofi` | The picker *(fallback)* |
 | `jq` | Editing Obsidian JSON configs |
 | `hyprland` | Cursor + IPC (`hyprctl`) |
 | Nerd Font + Comfortaa | Menu glyphs and UI text |
@@ -483,7 +499,7 @@ Everything it asks can be answered with Enter:
    files in it is never deleted: it offers, and refuses to do it unattended.
 
 Then it installs the dependencies, builds with `cargo install`, and links
-`quickshell/lumen` and the two rofi themes out of the checkout.
+`quickshell/lumen` out of the checkout.
 
 ```bash
 ./install/install.sh --dry-run    # print every step, change nothing
@@ -516,7 +532,7 @@ out in **[install/README.md](install/README.md)**.
 <br>
 
 You will need these on your `PATH` first: `awww`, `matugen`, `pywal`,
-`imagemagick`, `quickshell`, `rofi`, `jq`, plus a Nerd Font and Comfortaa. The
+`imagemagick`, `quickshell`, `jq`, plus a Nerd Font and Comfortaa. The
 [dependency table](#dependencies) above says what each is for.
 
 ### Option 1 — prebuilt binary (recommended)
@@ -606,6 +622,19 @@ would be a loop of restarts.
 **The thumbnail cache knows when it is stale.** Not only by timestamp: it reads
 the PNG header of each thumbnail and regenerates any that were built at an older,
 larger size.
+
+**A playing GIF is not the same wallpaper twice.** The `/tmp` copy every window
+already read is always a flat raster — named `.png` no matter the source, because
+a plain `Image` is all that ever reads it — so it was never going to be what plays.
+What does is the real file, extension and all, resolved by `lumen` itself from the
+symlink it already keeps in `Pictures/Wallpapers`, and handed to Quickshell as an
+environment variable rather than guessed from a fixed path. And Qt has its own
+opinion here: binding `AnimatedImage`'s `sourceSize` to the size it is actually
+drawn at — the same trick the still image uses to avoid decoding a 4K frame for a
+340px box — quietly decodes the movie a second time once layout settles, and the
+second decode comes back paused. Measured, not guessed, after a real GIF sat on
+screen not moving: the fix is to tell it to play again every time it says it is
+ready, which is cheap and survives however many times that happens.
 
 </details>
 
