@@ -9,7 +9,7 @@
 Pick an image, and its colors ripple out to every themed corner of your Hyprland
 desktop light or dark, in one keypress.
 
-![version](https://img.shields.io/badge/version-2.3.1-474064?style=flat-square) ![Rust](https://img.shields.io/badge/built_with-Rust-474064?style=flat-square&logo=rust&logoColor=white) ![Hyprland](https://img.shields.io/badge/Wayland-Hyprland-474064?style=flat-square&logo=hyprland&logoColor=white) ![Quickshell](https://img.shields.io/badge/UI-Quickshell-474064?style=flat-square) ![License](https://img.shields.io/badge/license-MIT-474064?style=flat-square)
+![version](https://img.shields.io/badge/version-v2.4-C36EFF?style=flat-square) ![Rust](https://img.shields.io/badge/built_with-Rust-2b86b5?style=flat-square&logo=rust&logoColor=white) ![Hyprland](https://img.shields.io/badge/Wayland-Hyprland-9ED53C?style=flat-square&logo=hyprland&logoColor=white) ![Quickshell](https://img.shields.io/badge/UI-Quickshell-FDBBFB?style=flat-square) ![License](https://img.shields.io/badge/license-MIT-65DDE1?style=flat-square)
 
 </div>
 
@@ -23,11 +23,12 @@ wallpaper folders, picker config:
 ```bash
 # 1 — clone and run it
 git clone https://github.com/tungsten-w/lumen.git
-./lumen/install/install.sh
+cd lumen
+./install/install.sh
 ```
 
 ```ini
-# 2 — bind it in your Hyprland config
+# 2 — bind it in your Hyprland config  (SUPER+W is recommended)
 ```
 
 That's it — hit <kbd>Super</kbd>+<kbd>W</kbd> and pick an image.
@@ -44,7 +45,7 @@ it through every app that will listen, then flips the whole system to light or
 dark to match.
 
 ```
-   wallpaper  ─►  matugen / pywal  ─►  palette extracted
+   wallpaper  ─►  matugen / pywal / noctalia  ─►  palette extracted
        │                                     │
        └──────────────►  palette propagated across:
                          GTK · rofi · tmux · Ghostty · Spicetify
@@ -111,13 +112,13 @@ Launch `lumen` and pick a mode from the menu:
 
 | | Option | What it does |
 |---|--------|--------------|
-| 🌙 | Dark | Browse `dark/` wallpapers with thumbnails |
-| ☀️ | Light | Browse `light/` wallpapers with thumbnails |
-| 🕘 | Time | Random wallpaper matching the current time of day |
-| 🍂 | Season | Random wallpaper matching the current season |
-| ⚙️ | Settings | Open the menu's own settings |
+| 🌙 | Dark | Browse `dark/` wallpapers |
+| ☀️ | Light | Browse `light/` wallpapers |
+| 🕘 | Time | Display a random wallpaper matching the current time of the day |
+| 🍂 | Season | Display a random wallpaper matching the current season |
+| 🔧 | Settings | Open the menu's own settings |
 
-Any of the first four can be switched off in the settings if you never use one.
+Any of the first four can be switched off in the settings if you never use one. (You can also add your own custom wallpaper sources.)
 
 ### Comands without the menu
 
@@ -141,7 +142,7 @@ started, which outlive it.
 
 The menu and the thumbnail grid are drawn by Quickshell, out of `quickshell/lumen/`.
 
-Out of the box they are a **pixel-for-pixel copy of the old rofi themes** — same
+Out of the box they are a **copy of the old rofi themes** — same
 306×165.7 element, same 3px border, same rounded frames. What is new is the
 movement rofi could not do: the window springs open, the selection slides from
 one wallpaper to the next, the grid rearranges itself as you type, and thumbnails
@@ -159,27 +160,10 @@ forever. **Color ▸ Source** says which of the three it listens to.
 <br>
 
 The picker opens **in insert mode**, so you can type the name of a wallpaper the
-moment the window is up — no mouse, no arrow keys. `hjkl` cannot double as
+moment the window is up — no mouse, no arrow keys. `h-j-k-l` cannot double as
 movement while you are typing (half of any wallpaper collection starts with an h,
 a j, a k or an l), so the grid borrows vim's two modes instead.
 
-| Insert mode | |
-|---|---|
-| type anything | Filter by name |
-| <kbd>Enter</kbd> | Apply the selection |
-| <kbd>Esc</kbd> | Leave insert mode, keeping the filter |
-
-| Normal mode | |
-|---|---|
-| <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> | Move through the grid |
-| <kbd>g</kbd><kbd>g</kbd> / <kbd>G</kbd> | First / last wallpaper |
-| <kbd>Ctrl</kbd>+<kbd>d</kbd> / <kbd>Ctrl</kbd>+<kbd>u</kbd> | Half a screen down / up |
-| <kbd>i</kbd> or <kbd>/</kbd> | Back to the search field |
-| <kbd>q</kbd> / <kbd>Esc</kbd> | Cancel |
-
-The search field is pink while it holds the keyboard and turns to the selection
-color once it does not, and its cursor becomes a vim block. That is the whole
-mode indicator — no banner, no label.
 
 Anything that is not a letter works from **either** mode, so you never have to
 switch if you do not want to: arrows, <kbd>Enter</kbd>,
@@ -196,7 +180,7 @@ outside cancels. The mode menu takes `hjkl`, arrows, <kbd>Enter</kbd> and
 
 <br>
 
-The mode menu and the picker each have their own panel — a panel only lists what
+⚠️ The mode menu and the picker each have their own panel — a panel only lists what
 its own window draws. Three ways in, whichever is closest to hand:
 
 ```bash
