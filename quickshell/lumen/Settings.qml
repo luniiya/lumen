@@ -170,6 +170,11 @@ Singleton {
                 property int menuColumns: 2
                 property real spacing: 10 // listview { spacing: 10px; }
                 property real rowSpacing: 10.5
+                /// Whether the grid opens in a fresh random order each time —
+                /// still only the wallpapers of whichever folder was opened,
+                /// dark, light, or one of your own, just not always led with
+                /// the same handful.
+                property bool shuffle: false
                 property real thumbPadding: 10 // element { padding: 10px; }
                 /// Width over height of the visible part of a thumbnail. Lower is
                 /// taller: 1.78 shows a 16:9 wallpaper whole, the rofi default of
@@ -307,6 +312,7 @@ Singleton {
             menuColumns: 2,
             spacing: 10,
             rowSpacing: 10.5,
+            shuffle: false,
             thumbPadding: 10,
             thumbAspect: 1.963,
             thumbZoom: 340,

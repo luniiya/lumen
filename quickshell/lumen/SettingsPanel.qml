@@ -190,6 +190,10 @@ Item {
     /// keys that would walk the list build this string instead.
     property bool naming: false
     property string draft: ""
+    /// What naming is *for*: `"save"` writes what is on screen, `"paste"`
+    /// writes what `Presets.pasteFromClipboard` just read in. Same row,
+    /// same keys — only which of Presets' two writers gets the name differs.
+    property string namingFor: "save"
 
     /// What is being looked for, across every tab at once. Empty is the panel
     /// as it was: six tabs, one of them open.
@@ -203,6 +207,72 @@ Item {
     property bool typing: false
 
     readonly property bool searching: panel.query.trim().length > 0
+
+    /// The keyboard cheatsheet, opened and closed with `?`.
+    property bool showHelp: false
+
+    /// Every key the panel answers to, in the order they are worth knowing.
+    /// Kept here rather than derived from `handleKey` itself: that switch is
+    /// arranged for how the keys are matched, not for how a person would read
+    /// them in a list.
+    readonly property var helpEntries: [
+        {
+            keys: "/ · Ctrl+F",
+            label: "Search every tab at once"
+        },
+        {
+            keys: "1 – 6",
+            label: "Jump straight to a tab"
+        },
+        {
+            keys: "Tab · Shift+Tab",
+            label: "Next tab · previous tab"
+        },
+        {
+            keys: "j / ↓ · k / ↑",
+            label: "Move down · move up"
+        },
+        {
+            keys: "h / ← · l / →",
+            label: "Decrease · increase — hold Shift for ×10"
+        },
+        {
+            keys: "g · Shift+G",
+            label: "First row · last row"
+        },
+        {
+            keys: "Page Up/Down",
+            label: "Jump five rows"
+        },
+        {
+            keys: "Enter · Space",
+            label: "Toggle a value, or apply a preset"
+        },
+        {
+            keys: "r",
+            label: "Reset the tab you are on"
+        },
+        {
+            keys: "u",
+            label: "Update a preset with what is on screen"
+        },
+        {
+            keys: "c",
+            label: "Copy a preset to the clipboard"
+        },
+        {
+            keys: "x · Delete",
+            label: "Remove a preset or a folder — press twice"
+        },
+        {
+            keys: "Esc · q",
+            label: "Close the search, then the panel"
+        },
+        {
+            keys: "?",
+            label: "This"
+        }
+    ]
 
     /// Which folder of your own is open for editing, or -1. Opening one grows
     /// three rows under it, the way pinning a colour grows its three channels.
@@ -268,6 +338,19 @@ Item {
 
         interval: 1300
         onTriggered: panel.announcing = false
+    }
+
+    /// A paste that parsed opens the same naming row Save does — Presets
+    /// holds the values, `namingFor` just tells `typeName` which of its two
+    /// writers the name is for.
+    Connections {
+        target: Presets
+
+        function onPasteReady() {
+            panel.draft = "";
+            panel.namingFor = "paste";
+            panel.naming = true;
+        }
     }
 
     Component.onCompleted: {
@@ -456,6 +539,7 @@ Item {
                 slider("layout", "columns", "Columns", 1, 8, 1);
                 slider("layout", "spacing", "Column spacing", 0, 40, 0.5, " px");
                 slider("layout", "rowSpacing", "Row spacing", 0, 40, 0.5, " px");
+                toggle("layout", "shuffle", "Shuffle order on open");
 
                 group("Thumbnails");
                 slider("layout", "thumbAspect", "Aspect", 1, 3, 0.01, "");
@@ -511,6 +595,12 @@ Item {
                     key: "save",
                     label: "Save this configuration",
                     verb: "Name it"
+                });
+                rows.push({
+                    kind: "action",
+                    key: "paste",
+                    label: "A preset from the clipboard",
+                    verb: "Paste"
                 });
             }
             rows.push({
@@ -957,7 +1047,10 @@ Item {
             const name = panel.draft;
             panel.naming = false;
             panel.draft = "";
-            Presets.save(name);
+            if (panel.namingFor === "paste")
+                Presets.savePasted(name);
+            else
+                Presets.save(name);
             break;
         case Qt.Key_Backspace:
             panel.draft = panel.draft.slice(0, -1);
@@ -1054,6 +1147,16 @@ Item {
     }
 
     function handleKey(event): bool {
+        const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
+
+        // The cheatsheet sits over everything else: while it is open, only
+        // what closes it again gets through.
+        if (panel.showHelp) {
+            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q || event.key === Qt.Key_Question || (event.key === Qt.Key_Slash && shift))
+                panel.showHelp = false;
+            return true;
+        }
+
         if (panel.naming)
             return panel.typeName(event);
 
@@ -1065,8 +1168,14 @@ Item {
         if (panel.typing && panel.typeQuery(event))
             return true;
 
-        const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
         const big = shift ? 10 : 1;
+
+        // `?` opens the cheatsheet. Checked ahead of `/` below, since on most
+        // layouts it arrives as the same key with Shift held.
+        if (event.key === Qt.Key_Question || (event.key === Qt.Key_Slash && shift)) {
+            panel.showHelp = true;
+            return true;
+        }
 
         // `/` is the picker's own way into its search field, and this is the
         // same panel's. Not while typing: there it is a character like any
@@ -1136,6 +1245,15 @@ Item {
             }
             return false;
         }
+        case Qt.Key_C: {
+            // Only a preset has a clipboard to go to.
+            const item = panel.currentWidget();
+            if (item && item.copyOut) {
+                item.copyOut();
+                return true;
+            }
+            return false;
+        }
         case Qt.Key_X:
         case Qt.Key_Delete: {
             // Rows that can throw something away say so; the rest ignore it.
@@ -1193,8 +1311,11 @@ Item {
             font.pixelSize: Style.textSize * 1.6
         }
 
-        /// The keys, in the order you reach for them.
+        /// The keys, in the order you reach for them — and a way into the
+        /// full list, for whoever wants the rest of them too.
         Row {
+            id: keyHint
+
             anchors.right: parent.right
             anchors.rightMargin: Style.picker.headerX + 6
             y: title.y + title.height - height - 2
@@ -1213,6 +1334,21 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 name: "enter"
                 size: Style.textSize * 1.15
+            }
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "·  ?"
+                color: Colors.foreground
+                font.family: Style.textFont
+                font.pixelSize: Style.textSize * 0.85
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                anchors.margins: -6
+                cursorShape: Qt.PointingHandCursor
+                onClicked: panel.showHelp = true
             }
         }
 
@@ -1320,32 +1456,27 @@ Item {
             }
         }
 
-        /// The search field. Folded away to nothing until it is asked for, so
-        /// the panel is the panel until you need it to be a list.
+        /// The search field, always on screen — a search you have to know a
+        /// shortcut to summon is one most people never find.
         ///
         /// Not a TextInput, for the reason SettingName gives: the panel already
         /// owns the keyboard and a focused field inside it would have to win it
         /// back and hand it over again cleanly. It draws a string and a caret,
-        /// and `typeQuery` collects the letters.
+        /// and `typeQuery` collects the letters. A click, or `/`, starts one.
         Item {
             id: searchBar
 
             x: tabBar.x
             y: tabBar.y + tabBar.height
             width: tabBar.width - panel.scrollGutter
-            // Zero when it is not wanted, which is what keeps the rows exactly
-            // where they were before there was a search at all.
-            height: panel.typing || panel.searching ? 42 : 0
+            height: 42
             clip: true
 
-            Behavior on height {
-                NumberAnimation {
-                    duration: Style.fadeDuration
-                    easing.type: Easing.OutCubic
-                }
-            }
-
             Rectangle {
+                id: searchBox
+
+                property bool hovered: false
+
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 34
@@ -1353,13 +1484,31 @@ Item {
                 color: "transparent"
                 border.width: 3
                 // The picker's own tell: the colour that holds the keyboard is
-                // not the colour that has handed it back.
-                border.color: panel.typing ? Colors.urgent : Colors.selected
+                // not the colour that has handed it back. Idle and unhovered,
+                // it stays dim rather than borrowing the "selected" colour —
+                // permanently on screen, it should not read as already
+                // focused.
+                border.color: {
+                    if (panel.typing)
+                        return Colors.urgent;
+                    if (searchBox.hovered)
+                        return Colors.selected;
+                    return Qt.alpha(Colors.foreground, 0.35);
+                }
 
                 Behavior on border.color {
                     ColorAnimation {
                         duration: Style.fadeDuration
                     }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.IBeamCursor
+                    hoverEnabled: true
+                    onEntered: searchBox.hovered = true
+                    onExited: searchBox.hovered = false
+                    onClicked: panel.typing = true
                 }
 
                 Text {
@@ -1657,7 +1806,11 @@ Item {
                                     switch (line.modelData.key) {
                                     case "save":
                                         panel.draft = "";
+                                        panel.namingFor = "save";
                                         panel.naming = true;
+                                        break;
+                                    case "paste":
+                                        Presets.pasteFromClipboard();
                                         break;
                                     case "addFolder":
                                         panel.addFolder();
@@ -1698,6 +1851,7 @@ Item {
                                 }
                                 revise: () => Presets.overwrite(line.modelData.key)
                                 erase: () => Presets.remove(line.modelData.key)
+                                copy: () => Presets.copyToClipboard(line.modelData.key)
                             }
                         }
 
@@ -1707,6 +1861,7 @@ Item {
                             SettingName {
                                 width: loader.width
                                 draft: panel.draft
+                                label: panel.namingFor === "paste" ? "Name for the pasted preset" : "Name"
                             }
                         }
 
@@ -1728,7 +1883,7 @@ Item {
                                         if (line.modelData.key === "presets") {
                                             if (Presets.status)
                                                 return Presets.status;
-                                            return "A preset is one JSON file in ~/.config/lumen/presets, shaped exactly like settings.json — readable, hand-editable, and worth sending to someone. Applying writes back only what the file holds, so a preset carrying nothing but colors leaves your layout alone. A dot and a coloured name mark the preset your settings already are — compared, not remembered, so it goes out the moment you move a slider. Update puts what is on screen into a preset you already have, so tuning one is not saving it again under another name. Update and `x` both ask twice; `u` is Update from the keyboard.";
+                                            return "A preset is one JSON file in ~/.config/lumen/presets, shaped exactly like settings.json — readable, hand-editable, and worth sending to someone. Applying writes back only what the file holds, so a preset carrying nothing but colors leaves your layout alone. A dot and a coloured name mark the preset your settings already are — compared, not remembered, so it goes out the moment you move a slider. Update puts what is on screen into a preset you already have, so tuning one is not saving it again under another name. Update and `x` both ask twice; `u` is Update from the keyboard, `c` is Copy. Copy puts a preset's file on the clipboard instead of a share link; Paste reads one back off it and asks you to name it, the same as Save.";
                                         }
                                         if (Wallreco.status)
                                             return Wallreco.status;
@@ -1965,6 +2120,90 @@ Item {
                 color: Colors.background
                 font.family: Style.textFont
                 font.pixelSize: Style.textSize * 0.85
+            }
+        }
+
+        /// The cheatsheet, opened with `?` — declared last so it paints over
+        /// everything else, tabs and tooltip included.
+        Rectangle {
+            id: help
+
+            anchors.fill: parent
+            radius: Style.picker.radius
+            color: Qt.alpha(Colors.background, 0.98)
+            visible: help.opacity > 0
+            opacity: panel.showHelp ? 1 : 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Style.fadeDuration
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: panel.showHelp = false
+            }
+
+            Column {
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 100, 460)
+                spacing: 16
+
+                Text {
+                    text: "Keyboard"
+                    color: Colors.selected
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize
+                    font.capitalization: Font.AllUppercase
+                    font.letterSpacing: 1.5
+                }
+
+                Column {
+                    id: entries
+
+                    width: parent.width
+                    spacing: 11
+
+                    Repeater {
+                        model: panel.helpEntries
+
+                        delegate: Row {
+                            id: entry
+
+                            required property var modelData
+
+                            width: entries.width
+                            spacing: 18
+
+                            Text {
+                                width: 128
+                                text: entry.modelData.keys
+                                color: Colors.selected
+                                font.family: Style.textFont
+                                font.pixelSize: Style.textSize * 0.88
+                            }
+
+                            Text {
+                                width: entry.width - 128 - 18
+                                wrapMode: Text.WordWrap
+                                text: entry.modelData.label
+                                color: Colors.foreground
+                                opacity: 0.85
+                                font.family: Style.textFont
+                                font.pixelSize: Style.textSize * 0.88
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Esc, ?, or click anywhere closes this."
+                    color: Colors.foreground
+                    opacity: 0.45
+                    font.family: Style.textFont
+                    font.pixelSize: Style.textSize * 0.8
+                }
             }
         }
     }

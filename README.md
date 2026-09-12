@@ -338,6 +338,13 @@ twice — it is the button you reach for after every nudge of a slider, and one 
 have to confirm is one you stop using. <kbd>u</kbd> on the row does the same, and
 `Default`, being no file, has neither button.
 
+*Copy* puts that same JSON on the clipboard — `Default` included, which has no
+file but is still worth handing to someone as a starting point — and *Paste a
+preset from the clipboard*, underneath *Save this configuration*, reads one back
+and asks for a name the same way Save does. Sharing a look no longer needs the
+file at `~/.config/lumen/presets` at all; a message with the JSON in it does the
+same job. <kbd>c</kbd> on a preset's row is Copy from the keyboard.
+
 **Tags** is where [wallreco](https://github.com/tungsten-w/wallreco) lives. It
 writes its tags into the filenames — `sunset.png` becomes
 `sunset-#orange-#warm-#sky.png` — which is exactly what the picker's search field
@@ -352,12 +359,18 @@ back.
 | <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search every tab at once |
 | <kbd>Tab</kbd> / <kbd>1</kbd>…<kbd>6</kbd> | Move between tabs |
 | <kbd>u</kbd> | Write your changes into the preset under the cursor |
+| <kbd>c</kbd> | Copy the preset under the cursor to the clipboard |
 | <kbd>x</kbd> | Delete the preset under the cursor (twice, it asks) |
 | <kbd>j</kbd> / <kbd>k</kbd> | Move through the settings |
 | <kbd>h</kbd> / <kbd>l</kbd> | Change the value (<kbd>Shift</kbd> for ten times the step) |
 | <kbd>Enter</kbd> | Flip a switch, or pin a color |
 | <kbd>r</kbd> | Reset the tab you are in — only what it shows, never the other panel's half |
+| <kbd>?</kbd> | Show this table, on top of the panel itself |
 | <kbd>Esc</kbd> / <kbd>q</kbd> | Drop the search, then close the panel |
+
+The search field itself is always on screen now rather than folded away until
+asked for — a click in it, or <kbd>/</kbd>, starts typing — and <kbd>?</kbd>
+opens the same table above as an overlay, for whichever key here you forget.
 
 Values land in `~/.config/lumen/settings.json` as you move a slider — there is no
 save button, because there is nothing to save. The file is hand-editable and
@@ -421,6 +434,106 @@ stderr rather than a silent do-nothing.
 
 ---
 
+##  🎛️ Customization reference
+
+<details>
+<summary><b>Every knob, tab by tab</b> — what each one holds, and which window actually draws it &nbsp;<i>(click to unfold)</i></summary>
+
+<br>
+
+[The picker](#the-picker) above covers how the panel itself behaves — the
+search, the tabs, the keyboard, the presets. This is what is actually sitting
+*in* each tab, so a look at one table says whether a knob exists at all before
+you go hunting for it.
+
+### Presets — the same tab in both panels
+
+| | |
+|---|---|
+| **Default** | not a file — the rofi measurements, the one preset that can never go missing |
+| **Apply** | writes a saved preset's values back |
+| **Update** (<kbd>u</kbd>) | writes what is on screen into a preset you already have, keeping only the keys it already held |
+| **Copy** (<kbd>c</kbd>) | puts that preset's JSON on the clipboard — `Default` included |
+| **Delete** (<kbd>x</kbd>) | removes a preset — asks twice |
+| **Save this configuration** | names and saves everything on screen |
+| **A preset from the clipboard** | reads `wl-paste`, and asks for a name to save it under |
+
+### Entries — menu only
+
+| | |
+|---|---|
+| Dark / Light / Time of day / Season | switches any of the four off the mode menu |
+| Folders of your own | name, an autocompleted path, a Nerd Font icon, and an on/off switch — as many as you like |
+
+### Shape
+
+| Setting | Menu | Picker |
+|---|:---:|:---:|
+| Window corner radius | ✅ | ✅ |
+| Window border | ✅ | ✅ |
+| Header corner radius | — | ✅ |
+| Thumbnail corner radius | — | ✅ |
+| Search field corner radius | — | ✅ |
+| Thumbnail border | — | ✅ |
+| Selected entry — pill inset | ✅ | — |
+| Selected entry — ring width | ✅ | — |
+| Selected entry — ring inset | ✅ | — |
+
+### Tags — picker only
+
+| | |
+|---|---|
+| Install [wallreco](https://github.com/tungsten-w/wallreco) | builds it if it is missing |
+| Tag what has no tags yet | runs it |
+| Recompute every tag | asks twice — renames every wallpaper in the folder |
+
+### Motion
+
+| Setting | Menu | Picker |
+|---|:---:|:---:|
+| Animations on/off | ✅ | ✅ |
+| Speed | ✅ | ✅ |
+| Bounce | ✅ | ✅ |
+| Selection lift | ✅ | ✅ |
+| Opening / closing duration | ✅ | ✅ |
+| Selection move duration | ✅ | ✅ |
+| Fades and hover duration | ✅ | ✅ |
+| Scroll duration | ✅ | ✅ |
+| Thumbnail stagger | — | ✅ |
+
+### Layout
+
+| Setting | Menu | Picker |
+|---|:---:|:---:|
+| Window width / height | ✅ | ✅ |
+| Columns | ✅ *(up to 4)* | ✅ *(up to 8)* |
+| Icon size | ✅ | — |
+| Column / row spacing | — | ✅ |
+| **Shuffle order on open** | — | ✅ *(a fresh random order each time the grid opens — still only whichever folder it opened)* |
+| Thumbnail aspect / zoom / padding | — | ✅ |
+| Window padding, header height | — | ✅ |
+| Search field width / height / text size | — | ✅ |
+| Wallpaper backdrop zoom / framing / blur / dim | ✅ | ✅ |
+| Animate GIFs | ✅ | ✅ |
+
+### Color
+
+| Setting | Menu | Picker |
+|---|:---:|:---:|
+| Palette source (pywal / matugen / noctalia) | ✅ | ✅ |
+| Background opacity | ✅ | ✅ |
+| Blur behind the window | ✅ | ✅ |
+| Background / Text / Border / Selection color | ✅ | ✅ |
+| Thumbnail border color | — | ✅ |
+
+Any of the five colors can be pinned: <kbd>Enter</kbd> on one freezes it at
+whatever the palette currently gives it and opens hue, saturation and
+lightness underneath; <kbd>Enter</kbd> again hands it back to `auto`.
+
+</details>
+
+---
+
 ##  Expected wallpaper layout
 
 <details>
@@ -464,6 +577,7 @@ sweeps out the ones whose wallpaper is gone.
 | `imagemagick` | Thumbnail generation + GIF handling |
 | [`quickshell`](https://quickshell.org) | The picker and the settings panel |
 | `jq` | Editing Obsidian JSON configs |
+| `wl-clipboard` | Copying and pasting presets |
 | `hyprland` | Cursor + IPC (`hyprctl`) |
 | Nerd Font + Comfortaa | Menu glyphs and UI text |
 | `spicetify` | Spotify theming *(optional)* |

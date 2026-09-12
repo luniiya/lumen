@@ -86,9 +86,26 @@ OverlayWindow {
 
         onLoaded: {
             const parsed = JSON.parse(items.text());
-            win.wallpapers = parsed.items ?? [];
+            const found = parsed.items ?? [];
+            // Reordered, never mixed: this is still only whatever folder
+            // `lumen` scanned to build the file — dark, light, one of your
+            // own — just not always led with the same handful of thumbnails.
+            win.wallpapers = Settings.layout.shuffle ? win.shuffled(found) : found;
             win.matches = win.wallpapers;
         }
+    }
+
+    /// Fisher–Yates, copying rather than mutating: `found` above is what the
+    /// file just handed back, and shuffling it in place would make a second
+    /// read of `items.text()` — a live reload while the picker is open —
+    /// look like it had rewritten its own order.
+    function shuffled(list: var): var {
+        const out = list.slice();
+        for (let i = out.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [out[i], out[j]] = [out[j], out[i]];
+        }
+        return out;
     }
 
     /// Typed into the search field instead of a wallpaper name, this opens the

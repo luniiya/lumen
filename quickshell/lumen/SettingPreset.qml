@@ -30,6 +30,9 @@ Item {
     /// Writes the configuration on screen over this preset.
     property var revise: null
     property var erase: null
+    /// Puts this preset's file on the clipboard, so it can be pasted
+    /// somewhere else — another machine, a message to whoever wants it.
+    property var copy: null
 
     /// Which button is waiting for its second press: `erase`, `update`, or
     /// nothing. One string rather than a flag each, so that arming one disarms
@@ -78,6 +81,14 @@ Item {
         preset.armed = "";
         if (preset.erase)
             preset.erase();
+    }
+
+    /// `c` on the row, and a click on *Copy*. No second press: unlike
+    /// updating or deleting, putting something on the clipboard changes
+    /// nothing this row holds, so there is nothing here to confirm.
+    function copyOut() {
+        if (preset.copy)
+            preset.copy();
     }
 
     implicitHeight: 44
@@ -216,6 +227,34 @@ Item {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: preset.overwrite()
+            }
+        }
+
+        /// Visible on every row, `Default` included — there is no file behind
+        /// it, but the rofi measurements are still worth copying out.
+        Rectangle {
+            width: copyLabel.implicitWidth + 26
+            height: 26
+            radius: height / 2
+            color: "transparent"
+            border.width: 3
+            border.color: Colors.foreground
+            opacity: 0.55
+
+            Text {
+                id: copyLabel
+
+                anchors.centerIn: parent
+                text: "Copy"
+                color: Colors.foreground
+                font.family: Style.textFont
+                font.pixelSize: Style.textSize * 0.8
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: preset.copyOut()
             }
         }
 

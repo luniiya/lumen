@@ -254,6 +254,7 @@ readonly REQUIRED=(
     "imagemagick|imagemagick|magick|Thumbnails, and GIF handling"
     "quickshell|quickshell quickshell-git|qs|The picker and the settings panel"
     "jq|jq|jq|Editing Obsidian's JSON"
+    "wl-clipboard|wl-clipboard|wl-copy|Copying and pasting presets"
     "JetBrains Mono Nerd Font|ttf-jetbrains-mono-nerd|font:JetBrainsMono Nerd Font|The menu glyphs"
     "Comfortaa|ttf-comfortaa|font:Comfortaa|The interface text"
 )

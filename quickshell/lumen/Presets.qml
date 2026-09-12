@@ -30,6 +30,15 @@ Singleton {
     /// are read; what `isCurrent` compares the live configuration against.
     property var contents: ({})
 
+    /// A configuration read off the clipboard, waiting on a name — see
+    /// `pasteFromClipboard` and `savePasted`. Cleared once it is written, so a
+    /// stray Enter afterwards cannot save it again under a second name.
+    property var pastedValues: null
+
+    /// Fired once a paste has parsed as something worth naming, which is what
+    /// the panel is waiting for to open the same naming row a Save does.
+    signal pasteReady
+
     function path(name: string): string {
         return `${root.directory}/${name}.json`;
     }
@@ -179,6 +188,65 @@ Singleton {
         root.status = `Deleted ${name}.`;
     }
 
+    /// Puts one preset's file on the clipboard — the same JSON `save` would
+    /// write, so pasting it back anywhere, on this machine or another, gives
+    /// the exact preset back. `Default` has no file, so it is `defaults`
+    /// itself: everything a preset can carry, at the rofi measurements.
+    function copyToClipboard(name: string) {
+        const values = name === "" ? Settings.defaults : root.contents[name];
+        if (!values) {
+            root.status = `${name || "Default"} is not read yet — try again in a moment.`;
+            return;
+        }
+        copier.command = ["wl-copy", JSON.stringify(values, null, 2)];
+        copier.running = true;
+        root.status = `${name || "Default"} copied to the clipboard.`;
+    }
+
+    /// Reads the clipboard, asking `handlePaste` to make sense of it.
+    function pasteFromClipboard() {
+        paster.running = true;
+    }
+
+    /// What a paste turned out to hold. Anything that is not an object a
+    /// preset could be is a clipboard with something else in it — a wallpaper
+    /// path, a URL, whatever was last copied — and is reported rather than
+    /// saved under a blank name.
+    function handlePaste(text: string) {
+        let values;
+        try {
+            values = JSON.parse(text);
+        } catch (error) {
+            values = null;
+        }
+        if (!values || typeof values !== "object") {
+            root.status = "The clipboard does not hold a preset.";
+            return;
+        }
+        root.pastedValues = values;
+        root.status = "Clipboard read — name it to save.";
+        root.pasteReady();
+    }
+
+    /// Writes what `pasteFromClipboard` read in under a new name — the
+    /// clipboard's half of `save`, which writes what is on screen instead.
+    function savePasted(name: string) {
+        const clean = root.clean(name);
+        if (!clean) {
+            root.status = "That name has nothing in it.";
+            return;
+        }
+        if (!root.pastedValues) {
+            root.status = "Nothing pasted yet.";
+            return;
+        }
+        root.write(clean, root.pastedValues);
+        root.remember(clean, root.pastedValues);
+        root.pastedValues = null;
+        root.status = `Saved as ${clean}, from the clipboard.`;
+        Qt.callLater(root.rescan);
+    }
+
     /// A preset name becomes a filename, so it may not wander out of the folder
     /// or hide itself. Everything else is left alone: people name things with
     /// spaces and accents, and there is no reason to mangle that.
@@ -302,6 +370,26 @@ Singleton {
         id: eraser
 
         onExited: Qt.callLater(root.rescan)
+    }
+
+    /// The text goes on the command line rather than through stdin: `wl-copy`
+    /// takes it as literal argv either way, and a real argument needs no pipe
+    /// to close before the clipboard is holding anything.
+    Process {
+        id: copier
+    }
+
+    Process {
+        id: paster
+
+        command: ["wl-paste", "-n"]
+
+        stdout: StdioCollector {
+            id: pasted
+
+            waitForEnd: true
+            onStreamFinished: root.handlePaste(pasted.text)
+        }
     }
 
     /// The directory has to be there before the model looks at it. `setText`

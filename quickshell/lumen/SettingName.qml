@@ -12,6 +12,7 @@ Item {
 
     required property string draft
     property bool selected: true
+    property string label: "Name"
 
     implicitHeight: 44
 
@@ -19,7 +20,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: parent.width * 0.42
         elide: Text.ElideRight
-        text: "Name"
+        text: row.label
         color: Colors.foreground
         font.family: Style.textFont
         font.pixelSize: Style.textSize
