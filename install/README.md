@@ -2,8 +2,8 @@
 
 ```
  /\_/\
-( o.o )   lumen
- > ^ <    install.sh
+( o.o )
+ > ^ <
 ```
 
 **What the installer does, step by step, and every path it touches.**
