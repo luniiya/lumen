@@ -72,7 +72,43 @@ fn restore_current_wallpaper() {
     // since been deleted is skipped rather than copied as an error.
     let kept = home_dir().join("Pictures/Wallpapers/current_wallpaper.jpg");
     if kept.exists() {
-        let _ = fs::copy(&kept, shown);
+        cache_wallpaper_still(&kept);
+    }
+}
+
+/// Keep the menu's still-image cache as a real PNG, including when the chosen
+/// wallpaper is a GIF or another format. The picker can separately use the
+/// original path to animate GIF backgrounds.
+fn cache_wallpaper_still(wallpaper: &Path) {
+    if wallpaper
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+    {
+        if let Err(error) = fs::copy(wallpaper, CURRENT_WALLPAPER) {
+            eprintln!("Could not cache wallpaper {}: {error}", wallpaper.display());
+        }
+        return;
+    }
+
+    let temporary = format!("{CURRENT_WALLPAPER}.tmp.png");
+    let mut first_frame = wallpaper.as_os_str().to_os_string();
+    first_frame.push("[0]");
+    let converted = Command::new("magick")
+        .arg(first_frame)
+        .arg(&temporary)
+        .status()
+        .is_ok_and(|status| status.success());
+    if converted {
+        if let Err(error) = fs::rename(&temporary, CURRENT_WALLPAPER) {
+            eprintln!("Could not cache wallpaper {}: {error}", wallpaper.display());
+            let _ = fs::remove_file(&temporary);
+        }
+    } else {
+        eprintln!(
+            "Could not convert wallpaper {} to PNG (ImageMagick needed)",
+            wallpaper.display()
+        );
+        let _ = fs::remove_file(&temporary);
     }
 }
 
@@ -700,7 +736,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
     {
         let wallpaper = wallpaper.to_path_buf();
         handles.push(thread::spawn(move || {
-            let _ = fs::copy(&wallpaper, CURRENT_WALLPAPER);
+            cache_wallpaper_still(&wallpaper);
         }));
     }
 
