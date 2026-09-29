@@ -643,6 +643,9 @@ the same Wallust run by adding templates to your Wallust config.
 An executable path in `LUMEN_WALLUST_HOOK` runs after a successful Wallust
 update. Lumen passes `LUMEN_DARK_MODE=dark` or `light` and the image path in
 `LUMEN_WALLPAPER`, so a desktop setup can refresh its own themes.
+Set `LUMEN_SKIP_NOCTALIA=1` when that hook handles a different shell and you
+do not want Lumen to launch or message upstream Noctalia. Spotify reload still
+runs when Spotify is open.
 
 ### By hand — any distribution
 

@@ -724,24 +724,27 @@ fn apply_all(wallpaper: &Path, dark: bool) {
     // Noctalia + Spicetify
     {
         let wallpaper = wallpaper.to_path_buf();
+        let skip_noctalia = std::env::var("LUMEN_SKIP_NOCTALIA").as_deref() == Ok("1");
         handles.push(thread::spawn(move || {
-            if !is_running("noctalia") {
-                let _ = Command::new("nohup")
-                    .args(["noctalia", "-d"])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
-                thread::sleep(Duration::from_secs(3));
-            }
+            if !skip_noctalia {
+                if !is_running("noctalia") {
+                    let _ = Command::new("nohup")
+                        .args(["noctalia", "-d"])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
+                    thread::sleep(Duration::from_secs(3));
+                }
 
-            let mode = if dark { "dark" } else { "light" };
-            let _ = Command::new("noctalia")
-                .args(["msg", "theme-mode-set", mode])
-                .status();
-            let _ = Command::new("noctalia")
-                .args(["msg", "wallpaper-set"])
-                .arg(&wallpaper)
-                .status();
+                let mode = if dark { "dark" } else { "light" };
+                let _ = Command::new("noctalia")
+                    .args(["msg", "theme-mode-set", mode])
+                    .status();
+                let _ = Command::new("noctalia")
+                    .args(["msg", "wallpaper-set"])
+                    .arg(&wallpaper)
+                    .status();
+            }
 
             if is_running("spotify") {
                 // Spotify's colours are not ours to write: Noctalia's own
