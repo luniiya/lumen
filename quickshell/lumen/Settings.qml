@@ -114,14 +114,16 @@ Singleton {
         JsonAdapter {
             id: adapter
 
-            /// Which of the four entries the mode menu offers, and in what order.
-            /// The way into the settings is not one of them: Ctrl+, opens it
-            /// from the menu whatever is switched on.
+            /// Which of the four entries the mode menu offers, in what order,
+            /// and whether the settings cog is shown beside them.
             property JsonObject modes: JsonObject {
                 property bool dark: true
                 property bool light: true
                 property bool time: true
                 property bool season: true
+                /// Whether the menu shows its settings cog. Off, Ctrl+, still
+                /// opens the panel, and the cog comes back on an empty menu.
+                property bool cog: true
                 /// The order the four are offered in, comma-separated. Read
                 /// through `modeOrder`, which forgives a hand-edited one.
                 property string order: "light,dark,time,season"
@@ -289,6 +291,7 @@ Singleton {
             light: true,
             time: true,
             season: true,
+            cog: true,
             order: "light,dark,time,season"
         },
         shape: {

@@ -439,6 +439,7 @@ Item {
             touched.push("order");
             for (const id of Settings.modeOrder())
                 toggle("modes", id, panel.modeLabels[id]);
+            toggle("modes", "cog", "Settings button");
 
             // Folders of your own sit under the four built-in entries, in the
             // one tab that is about what the menu offers. They are not part of
@@ -1017,7 +1018,7 @@ Item {
     /// with it. Any other row ignores it.
     function moveMode(by: int): bool {
         const row = panel.rows[panel.currentIndex];
-        if (!row || row.kind !== "toggle" || row.group !== "modes")
+        if (!row || row.kind !== "toggle" || row.group !== "modes" || !Settings.modeIds.includes(row.key))
             return false;
         // Moving it rebuilds the rows, through `modeOrderState`.
         if (!Settings.moveMode(row.key, by))
