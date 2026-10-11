@@ -413,64 +413,212 @@ fn spicetify_colors() -> Option<PathBuf> {
     colors.is_file().then_some(colors)
 }
 
-/// What a run of `spicetify reload` actually did.
+/// Whether a `/proc/<pid>/cmdline` is a `spicetify watch`.
 ///
-/// Live reload needs a connection to Spotify's DevTools. The first run after
-/// Spotify starts — and any run after Spotify has updated itself — does not
-/// reload anything: it turns DevTools on, restarts Spotify once, and says on
-/// stdout to run the command again. Both passes exit 0 and neither takes a
-/// flag, so the text is the only thing that tells them apart.
-///
-/// Left unread, that meant the first wallpaper of every session did nothing at
-/// all to Spotify, which looks exactly like the command being broken.
-///
-/// From `spicetify-live_reload`, which is a fork: the wording is matched on the
-/// shortest distinctive part of each line rather than on the whole of it.
-#[derive(PartialEq, Debug)]
-enum Reload {
-    /// The colours are in Spotify.
-    Pushed,
-    /// It only set the connection up, and restarted Spotify doing so.
-    SetUp,
-    /// Neither — an older spicetify, a failure, an empty run.
-    Unclear,
+/// The arguments arrive NUL-separated. `comm` alone cannot tell a watch from
+/// an `apply` or a `refresh` that happens to be running, so this reads the
+/// command line instead — `pgrep -f`, without the fork.
+fn is_watch_cmdline(cmdline: &[u8]) -> bool {
+    let mut args = cmdline.split(|&b| b == 0).filter(|arg| !arg.is_empty());
+    let is_spicetify = args
+        .next()
+        .is_some_and(|argv0| argv0.rsplit(|&b| b == b'/').next() == Some(b"spicetify"));
+    is_spicetify && args.any(|arg| arg == b"watch")
 }
 
-fn read_reload(said: &str) -> Reload {
-    if said.contains("Reloaded theme colors") {
-        Reload::Pushed
-    } else if said.contains("run this command again") {
-        Reload::SetUp
-    } else {
-        Reload::Unclear
+/// Whether a `/proc/<pid>/cmdline` is Spotify's main process.
+///
+/// Every helper Spotify forks — zygote, renderer, crashpad — is also called
+/// `spotify`, and only they carry a `--type=`.
+fn is_spotify_main_cmdline(cmdline: &[u8]) -> bool {
+    let mut args = cmdline.split(|&b| b == 0).filter(|arg| !arg.is_empty());
+    let is_spotify = args
+        .next()
+        .is_some_and(|argv0| argv0.rsplit(|&b| b == b'/').next() == Some(b"spotify"));
+    is_spotify && !args.any(|arg| arg.starts_with(b"--type="))
+}
+
+/// When a process started, in clock ticks since boot, out of its
+/// `/proc/<pid>/stat` — field 22. The name in field 2 sits in parentheses and
+/// may itself hold spaces or a `)`, so the count starts after the last one.
+fn start_time_of(stat: &str) -> Option<u64> {
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+/// Every process whose command line `matches`, with when it started.
+fn processes_where(matches: fn(&[u8]) -> bool) -> Vec<(String, u64)> {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_string_lossy().to_string();
+            if !pid.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let cmdline = fs::read(entry.path().join("cmdline")).ok()?;
+            if !matches(&cmdline) {
+                return None;
+            }
+            let stat = fs::read_to_string(entry.path().join("stat")).ok()?;
+            Some((pid, start_time_of(&stat)?))
+        })
+        .collect()
+}
+
+/// Whether a `spicetify watch` is running against the Spotify open right now.
+///
+/// A watcher keeps the DevTools address of the Spotify it started with. Close
+/// Spotify and open it again and that address is dead: the watcher still runs,
+/// but the next change it sees fails to reload and kills it — taking that
+/// wallpaper's colours with it. So a watcher older than Spotify does not count.
+fn spicetify_is_watching() -> bool {
+    let Some(spotify) = processes_where(is_spotify_main_cmdline)
+        .into_iter()
+        .map(|(_, started)| started)
+        .max()
+    else {
+        return false;
+    };
+    processes_where(is_watch_cmdline)
+        .iter()
+        .any(|&(_, started)| started >= spotify)
+}
+
+/// The port `spicetify watch` reaches Spotify on, and the flags that open it.
+///
+/// They are also in `~/.config/spotify-flags.conf`, which Arch's `spotify`
+/// wrapper reads on every launch — that is what keeps a restart from ever being
+/// needed. The origin is `spicetify`'s own, not `*`: any page in a browser could
+/// otherwise talk to Spotify through it.
+const SPOTIFY_DEVTOOLS: &str = "127.0.0.1:9222";
+const SPOTIFY_DEVTOOLS_FLAGS: [&str; 2] = [
+    "--remote-debugging-port=9222",
+    "--remote-allow-origins=http://localhost/",
+];
+
+/// Whether Spotify answers on its DevTools port.
+fn spotify_devtools_open() -> bool {
+    use std::io::Write;
+    use std::net::TcpStream;
+
+    let Ok(address) = SPOTIFY_DEVTOOLS.parse() else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(500)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    if stream
+        .write_all(b"GET /json/list HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
     }
+    // A timeout still leaves whatever did arrive in the buffer.
+    let mut answer = Vec::new();
+    let _ = stream.read_to_end(&mut answer);
+    answer.windows(7).any(|window| window == b"spotify")
 }
 
-/// Pushes the new colours into Spotify, restarting it at most once.
+/// Restarts Spotify with its DevTools port open, and says whether it came up.
 ///
-/// Asks a second time when the first run only set the connection up. Exactly
-/// once: a run that finds no live connection restarts Spotify to make one, so
-/// asking again in a loop would be a loop of restarts rather than a retry.
-fn reload_spotify() {
-    let Ok(first) = Command::new("spicetify").arg("reload").output() else {
+/// `spicetify watch` would do this itself, but it starts the new Spotify the
+/// instant the old one has been sent SIGTERM. The new one finds the old one
+/// still there, hands over to it and exits, then the old one exits as well: no
+/// Spotify at all, and a watcher polling for a port that never opens, at 100%
+/// CPU, forever. So the old one is waited out first.
+fn restart_spotify_with_devtools() -> bool {
+    let _ = Command::new("pkill").args(["-x", "spotify"]).status();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while is_running("spotify") {
+        if std::time::Instant::now() > deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+
+    if Command::new("nohup")
+        .arg("spotify")
+        .args(SPOTIFY_DEVTOOLS_FLAGS)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_err()
+    {
+        return false;
+    }
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        if spotify_devtools_open() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    false
+}
+
+/// Starts `spicetify watch -s`, detached, unless one is already watching.
+///
+/// Official spicetify has no one-shot live reload — `refresh` restarts Spotify,
+/// `refresh -n` rewrites the CSS without reloading anything. `watch -s` is the
+/// way it does it: a long-lived process that rereads the active theme's
+/// `color.ini` every 200 ms and reloads Spotify through DevTools whenever it
+/// changes. Once it runs, the colours follow Noctalia's rewrite on their own
+/// and there is nothing left for `lumen` to do.
+///
+/// On its first pass it treats every file as changed, so starting it pushes
+/// the palette already on disk — which is why the caller waits for Noctalia's
+/// write first.
+///
+/// It is never left to open DevTools by itself: see
+/// `restart_spotify_with_devtools` for what it does then. With the flags in
+/// `spotify-flags.conf` the port is already open and nothing restarts at all.
+fn ensure_spicetify_watch() {
+    if spicetify_is_watching() {
+        return;
+    }
+
+    // What is left belongs to a Spotify that has since been closed, or is
+    // stuck waiting for a port that never opened.
+    for (pid, _) in processes_where(is_watch_cmdline) {
+        let _ = Command::new("kill").arg(&pid).status();
+    }
+
+    if !spotify_devtools_open() && !restart_spotify_with_devtools() {
+        eprintln!("Spotify n'a pas ouvert DevTools; ses couleurs suivront au prochain fond.");
+        return;
+    }
+
+    // Kept rather than thrown away: a watcher that dies in the background has
+    // nobody to tell, and this is the only place it can say why.
+    let log_dir = home_dir().join(".cache/lumen");
+    let _ = fs::create_dir_all(&log_dir);
+    let log = fs::File::create(log_dir.join("spicetify-watch.log"))
+        .ok()
+        .and_then(|file| Some((file.try_clone().ok()?, file)));
+    let (stdout, stderr) = match log {
+        Some((copy, file)) => (Stdio::from(file), Stdio::from(copy)),
+        None => (Stdio::null(), Stdio::null()),
+    };
+
+    if Command::new("nohup")
+        .args(["spicetify", "watch", "-s"])
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
+        .spawn()
+        .is_err()
+    {
         eprintln!("spicetify introuvable.");
-        return;
-    };
-    if read_reload(&String::from_utf8_lossy(&first.stdout)) != Reload::SetUp {
-        return;
-    }
-
-    // Spotify is coming back up. The DevTools connection is not there the
-    // instant the process is, so the wait is for the connection rather than
-    // for the process — measured at a couple of seconds on this machine.
-    wait_for_process("spotify", Duration::from_secs(20));
-    thread::sleep(Duration::from_secs(3));
-
-    let Ok(again) = Command::new("spicetify").arg("reload").output() else {
-        return;
-    };
-    if read_reload(&String::from_utf8_lossy(&again.stdout)) != Reload::Pushed {
-        eprintln!("spicetify n'a pas rechargé les couleurs; Spotify les aura au prochain fond.");
     }
 }
 
@@ -567,18 +715,6 @@ fn reload_brave(wallust: bool) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-}
-
-/// Blocks until `name` is running, and says whether it turned up.
-fn wait_for_process(name: &str, timeout: Duration) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        if is_running(name) {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(200));
-    }
-    false
 }
 
 /// Blocks until `path` has been written since `since`, and says whether it was.
@@ -782,13 +918,15 @@ fn apply_all(wallpaper: &Path, dark: bool) {
                     .status();
             }
 
-            if is_running("spotify") {
+            // A watcher already running sees Noctalia's rewrite of `color.ini`
+            // by itself and reloads Spotify; there is nothing to wait for.
+            if is_running("spotify") && !spicetify_is_watching() {
                 // Spotify's colours are not ours to write: Noctalia's own
                 // spicetify template writes them, and it does so a good while
-                // after `wallpaper-set` has returned — measured at three seconds
-                // against a reload that used to fire at two. Reloading early
-                // hands Spotify the palette of the *previous* wallpaper, which
-                // looks exactly like the command never ran.
+                // after `wallpaper-set` has returned — measured at three seconds.
+                // A watcher started before that would push the *previous*
+                // wallpaper's palette on its first pass, then reload a second
+                // time once the file changed.
                 //
                 // So we wait for the file itself rather than for a duration.
                 match spicetify_colors() {
@@ -797,7 +935,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
                     }
                     None => thread::sleep(Duration::from_secs(3)),
                 }
-                reload_spotify();
+                ensure_spicetify_watch();
             }
         }));
     }
@@ -844,12 +982,43 @@ fn apply_all(wallpaper: &Path, dark: bool) {
 // MAIN MENU
 // ══════════════════════════════════════════════════════════════
 
+/// Dark or light for the season's wallpaper — the one mode whose folder does
+/// not decide it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Shade {
+    Dark,
+    Light,
+    /// Follows the clock the way Time does: dark once the sun is down.
+    Auto,
+}
+
+impl Shade {
+    fn parse(word: &str) -> Option<Shade> {
+        match word {
+            "dark" => Some(Shade::Dark),
+            "light" => Some(Shade::Light),
+            "auto" => Some(Shade::Auto),
+            _ => None,
+        }
+    }
+
+    fn is_dark(self, hour: u32) -> bool {
+        match self {
+            Shade::Dark => true,
+            Shade::Light => false,
+            Shade::Auto => moment_for_hour(hour) != "day",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 enum Mode {
     Dark,
     Light,
     Heure,
-    Saison,
+    /// The menu answers `season:dark` or `season:light` once its question has
+    /// been answered, or `season:auto` when the panel says to follow the clock.
+    Saison(Shade),
     /// A folder of your own, added in the settings panel and shown in the mode
     /// menu beside the four above.
     ///
@@ -871,11 +1040,15 @@ impl Mode {
         {
             return Some(Mode::Folder(expand_home(path)));
         }
+        if let Some(shade) = answer.strip_prefix("season:") {
+            return Shade::parse(shade).map(Mode::Saison);
+        }
         match answer {
             "dark" => Some(Mode::Dark),
             "light" => Some(Mode::Light),
             "time" => Some(Mode::Heure),
-            "season" => Some(Mode::Saison),
+            // A menu from before the question: light, as it always was.
+            "season" => Some(Mode::Saison(Shade::Light)),
             _ => None,
         }
     }
@@ -1001,14 +1174,39 @@ fn apply_time_of_day() {
     }
 }
 
-/// Random wallpaper for the season it is. Always light, as the menu has it.
-fn apply_season() {
+/// Random wallpaper for the season it is, in whichever mode was asked for.
+///
+/// A season says nothing about the hour, so the mode is not taken from the
+/// folder the way Time takes it: the mode menu asks — see `Shade` — or the
+/// settings panel has said once and for all.
+fn apply_season(shade: Shade) {
     let saison = get_saison();
     if let Some(wp) =
         pick_random(&home_dir().join(format!("Pictures/Wallpapers/season-time/{saison}")))
     {
-        apply_all(&wp, false);
+        apply_all(&wp, shade.is_dark(Local::now().hour()));
     }
+}
+
+/// What `modes.seasonTheme` says the season should be drawn in, for a run
+/// that has nobody to ask.
+///
+/// `ask` is the mode menu's question, and a timer cannot answer one: it falls
+/// back to light, which is what the season has always been.
+fn season_shade_setting(settings: Option<&serde_json::Value>) -> Shade {
+    settings
+        .and_then(|value| value.get("modes"))
+        .and_then(|value| value.get("seasonTheme"))
+        .and_then(|value| value.as_str())
+        .and_then(Shade::parse)
+        .unwrap_or(Shade::Light)
+}
+
+fn selected_season_shade() -> Shade {
+    let settings = fs::read_to_string(home_dir().join(".config/lumen/settings.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    season_shade_setting(settings.as_ref())
 }
 
 /// Path of the lock the unattended modes hold.
@@ -1130,7 +1328,9 @@ lumen — one wallpaper, and the whole desktop follows.
 Usage:
   lumen                  the menu: dark, light, time of day, season
   lumen --time           a random wallpaper for the time of day, no prompt
-  lumen --season         a random wallpaper for the season, no prompt
+  lumen --season [MODE]  a random wallpaper for the season, no prompt —
+                         MODE is dark, light or auto (dark after sunset);
+                         without it, the menu's Season setting decides
   lumen --settings       the picker's settings: shape, motion, layout, color
   lumen --thumbs [DIR…]  rebuild the thumbnails without showing anything
   lumen --help           this
@@ -1151,13 +1351,22 @@ fn main() {
     // Unattended: no prompt at all, for a timer or a keybind of its own.
     if let Some(mode) = args.first().and_then(|arg| match arg.as_str() {
         "--time" => Some(Mode::Heure),
-        "--season" => Some(Mode::Saison),
+        "--season" => {
+            let shade = match args.get(1) {
+                Some(word) => Shade::parse(word).unwrap_or_else(|| {
+                    eprintln!("Unknown season mode: {word} (dark, light or auto)\n\n{USAGE}");
+                    std::process::exit(2);
+                }),
+                None => selected_season_shade(),
+            };
+            Some(Mode::Saison(shade))
+        }
         _ => None,
     }) {
         take_auto_lock();
         match mode {
-            Mode::Heure => apply_time_of_day(),
-            _ => apply_season(),
+            Mode::Saison(shade) => apply_season(shade),
+            _ => apply_time_of_day(),
         }
         let _ = fs::remove_file(auto_lock());
         return;
@@ -1209,8 +1418,8 @@ fn main() {
         }
         // Heure — random, dark if night/sunset
         Some(Mode::Heure) => apply_time_of_day(),
-        // Saison — random, light
-        Some(Mode::Saison) => apply_season(),
+        // Saison — random, in the mode the menu was told
+        Some(Mode::Saison(shade)) => apply_season(shade),
         // One of your own folders — the grid, then the mode you asked for.
         Some(Mode::Folder(dir)) => {
             if let Some((wp, dark)) = pick_from_folder(&config, &dir) {
@@ -1289,30 +1498,49 @@ mod tests {
     }
 
     #[test]
-    fn reload_output_is_read_correctly() {
-        // Verbatim from the strings inside `spicetify vbeta-live-reload`. One
-        // line each on purpose: a `\` continuation in a Rust literal eats the
-        // indentation of the next line as well, which welded "run" to "this" and
-        // left this test checking a sentence no spicetify would ever print.
-        let pushed = "success  Reloaded theme colors without restarting Spotify";
-        let set_up = "Applied theme. Spotify is now set up for live reload; run this command again next time to update colors without restarting.";
-        let restarting = " No live connection to Spotify found. Enabling DevTools and restarting once to set it up...";
+    fn a_spicetify_watch_is_told_apart_from_other_runs() {
+        // Exactly as /proc hands it over: NUL-separated, NUL-terminated.
+        assert!(is_watch_cmdline(b"spicetify\0watch\0-s\0"));
+        assert!(is_watch_cmdline(b"/usr/bin/spicetify\0watch\0-s\0"));
+        assert!(is_watch_cmdline(b"spicetify\0-q\0watch\0-l\0"));
 
-        assert_eq!(read_reload(pushed), Reload::Pushed);
-        assert_eq!(read_reload(set_up), Reload::SetUp);
-        // The whole first pass, both lines together, reads the same way.
-        assert_eq!(
-            read_reload(&format!("{restarting}\n{set_up}")),
-            Reload::SetUp
-        );
+        // Spicetify doing something else, and something else mentioning watch.
+        assert!(!is_watch_cmdline(b"spicetify\0apply\0"));
+        assert!(!is_watch_cmdline(b"spicetify\0refresh\0-n\0"));
+        assert!(!is_watch_cmdline(b"nvim\0spicetify\0watch\0"));
+        assert!(!is_watch_cmdline(b"/usr/bin/notspicetify\0watch\0"));
+        assert!(!is_watch_cmdline(b""));
+    }
 
-        // The two must never be confused: the whole point is asking again after
-        // one of them and not after the other.
-        assert_ne!(read_reload(pushed), read_reload(set_up));
+    #[test]
+    fn spotify_main_is_told_apart_from_its_helpers() {
+        assert!(is_spotify_main_cmdline(b"/opt/spotify/spotify\0--uri\0"));
+        assert!(is_spotify_main_cmdline(
+            b"/opt/spotify/spotify\0--remote-debugging-port=9222\0"
+        ));
 
-        // An older spicetify with no live reload at all, and a silent run.
-        assert_eq!(read_reload("Applied theme"), Reload::Unclear);
-        assert_eq!(read_reload(""), Reload::Unclear);
+        assert!(!is_spotify_main_cmdline(
+            b"/opt/spotify/spotify\0--type=zygote\0--no-sandbox\0"
+        ));
+        assert!(!is_spotify_main_cmdline(
+            b"/opt/spotify/spotify\0--monitor-self-annotation=ptype=crashpad-handler\0--type=crashpad-handler\0"
+        ));
+        assert!(!is_spotify_main_cmdline(b"spicetify\0watch\0-s\0"));
+        assert!(!is_spotify_main_cmdline(b""));
+    }
+
+    #[test]
+    fn start_time_is_read_past_the_name() {
+        // Field 22 is 8800; the name has a space and a `)` in it on purpose.
+        let stat = "146085 (spi cetify)) S 1 146085 146085 0 -1 4194560 1 0 0 0 \
+                    5 6 0 0 20 0 9 0 8800 1000 100";
+        assert_eq!(start_time_of(stat), Some(8800));
+        assert_eq!(start_time_of("146085 (spicetify) S 1"), None);
+        assert_eq!(start_time_of(""), None);
+
+        // And the live one parses: this very test is running.
+        let own = fs::read_to_string("/proc/self/stat").unwrap();
+        assert!(start_time_of(&own).is_some());
     }
 
     #[test]
@@ -1366,7 +1594,15 @@ color_scheme           = Comfy
         assert_eq!(Mode::parse("dark"), Some(Mode::Dark));
         assert_eq!(Mode::parse("light"), Some(Mode::Light));
         assert_eq!(Mode::parse("time"), Some(Mode::Heure));
-        assert_eq!(Mode::parse("season"), Some(Mode::Saison));
+        assert_eq!(Mode::parse("season"), Some(Mode::Saison(Shade::Light)));
+        assert_eq!(Mode::parse("season:dark"), Some(Mode::Saison(Shade::Dark)));
+        assert_eq!(
+            Mode::parse("season:light"),
+            Some(Mode::Saison(Shade::Light))
+        );
+        assert_eq!(Mode::parse("season:auto"), Some(Mode::Saison(Shade::Auto)));
+        assert_eq!(Mode::parse("season:"), None);
+        assert_eq!(Mode::parse("season:dusk"), None);
 
         // A cancelled prompt, and anything that is none of the above.
         assert_eq!(Mode::parse(""), None);
@@ -1443,7 +1679,29 @@ color_scheme           = Comfy
 
         // And the four the menu has always answered are untouched.
         assert_eq!(Mode::parse("dark"), Some(Mode::Dark));
-        assert_eq!(Mode::parse("season"), Some(Mode::Saison));
+        assert_eq!(Mode::parse("season"), Some(Mode::Saison(Shade::Light)));
+    }
+
+    #[test]
+    fn season_shade_follows_the_clock_only_when_auto() {
+        for hour in 0..24 {
+            assert!(Shade::Dark.is_dark(hour));
+            assert!(!Shade::Light.is_dark(hour));
+        }
+        // The same split as Time: day is light, sunset and night are dark.
+        assert!(!Shade::Auto.is_dark(12));
+        assert!(Shade::Auto.is_dark(19));
+        assert!(Shade::Auto.is_dark(2));
+    }
+
+    #[test]
+    fn season_shade_setting_is_read_from_the_settings() {
+        let with = |theme: &str| serde_json::json!({"modes": {"seasonTheme": theme}});
+        assert_eq!(season_shade_setting(Some(&with("dark"))), Shade::Dark);
+        assert_eq!(season_shade_setting(Some(&with("auto"))), Shade::Auto);
+        // `ask` has nobody to ask on a timer, and an old file has no key at all.
+        assert_eq!(season_shade_setting(Some(&with("ask"))), Shade::Light);
+        assert_eq!(season_shade_setting(None), Shade::Light);
     }
 
     #[test]

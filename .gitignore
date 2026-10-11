@@ -1,3 +1,4 @@
 /lumen/target/
 /lumen/lumen
 settings.json
+*.bak

@@ -127,6 +127,11 @@ Singleton {
                 /// The order the four are offered in, comma-separated. Read
                 /// through `modeOrder`, which forgives a hand-edited one.
                 property string order: "light,dark,time,season"
+                /// What Season is drawn in. `ask` asks dark or light in the
+                /// menu once Season is picked — a season says nothing about
+                /// the hour, so it is yours to say. `auto` follows the clock the
+                /// way Time does; `dark` and `light` skip the question.
+                property string seasonTheme: "ask"
             }
 
             /// Folders of your own, each an entry in the mode menu beside the
@@ -292,7 +297,8 @@ Singleton {
             time: true,
             season: true,
             cog: true,
-            order: "light,dark,time,season"
+            order: "light,dark,time,season",
+            seasonTheme: "ask"
         },
         shape: {
             windowRadius: 20,

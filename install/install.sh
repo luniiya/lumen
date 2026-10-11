@@ -241,10 +241,10 @@ source_of() {
 # label | candidate package names | how to tell it is there | why
 #
 # Presence is judged on what lumen itself would find, not on what pacman
-# thinks: spicetify lives in ~/.spicetify and belongs to no package at all, and
-# a font is a font whether it arrived from a repository or was dropped into
-# ~/.local/share/fonts by hand. `font:Name` asks fontconfig, anything else is a
-# command to look for on PATH.
+# thinks: spicetify may come from a package or from its own installer in
+# ~/.spicetify, and a font is a font whether it arrived from a repository or was
+# dropped into ~/.local/share/fonts by hand. `font:Name` asks fontconfig,
+# anything else is a command to look for on PATH.
 
 readonly REQUIRED=(
     "git|git|git|Cloning this checkout, and updating it"
@@ -263,7 +263,7 @@ readonly REQUIRED=(
 readonly OPTIONAL=(
     "wallust|wallust wallust-bin|wallust|Another classic color source"
     "noctalia|noctalia-shell noctalia-git|noctalia|Theming the Noctalia shell"
-    "spicetify|spicetify-cli|spicetify|Recolouring Spotify"
+    "spicetify|spicetify-bin spicetify-cli|spicetify|Recolouring Spotify"
 )
 
 # Whether one row of the tables above is already satisfied.

@@ -87,7 +87,7 @@ day or the season and never think about it again.
 - **Vim keys everywhere** — `hjkl`, `gg`/`G`, `Ctrl+d`/`Ctrl+u`, two modes, and a
   block cursor to tell you which one you are in.
 - **A settings panel per window** — the mode menu has its own, the picker has
-  its own, 74 knobs between them and **nothing shared**: corner radii, animation
+  its own, 77 knobs between them and **nothing shared**: corner radii, animation
   timings, column counts, blur, colors — every one redrawn **live** on the window
   next to it, none of them needing a restart.
 - **Real blur** — frosted glass over the wallpaper in the header, and compositor
@@ -116,22 +116,36 @@ Launch `lumen` and pick a mode from the menu:
 | 🌙 | Dark | Browse `dark/` wallpapers |
 | ☀️ | Light | Browse `light/` wallpapers |
 | 🕘 | Time | Display a random wallpaper matching the current time of the day |
-| 🍂 | Season | Display a random wallpaper matching the current season |
+| 🍂 | Season | Display a random wallpaper matching the current season — then asks **dark or light** |
 | 🔧 | Settings | Open the menu's own settings |
 
 Any of the first four can be switched off in the settings if you never use one. (You can also add your own custom wallpaper sources.)
+
+A season says nothing about the hour, so **Season asks**: the bar gives way to
+a card naming the season it is about — *Autumn, dark or light?* — with a Dark /
+Light switch whose highlight already sits on what the clock suggests: dark after
+18h, light during the day. <kbd>Enter</kbd> alone does the obvious,
+<kbd>h</kbd>/<kbd>l</kbd> or <kbd>Tab</kbd> picks the other, and the arrow,
+<kbd>Esc</kbd> or <kbd>Backspace</kbd> goes back to the menu. It is drawn by the
+menu itself, so every shape, motion and color knob of the menu's panel applies
+to it too.
+Rather not be asked? **Entries ▸ Season ▸ Dark or light** in the menu's panel
+takes `ask`, `clock` (dark once the sun is down, like Time), `dark` or `light`.
 
 ### Comands without the menu
 
 ```bash
 lumen --time     # a random wallpaper for the time of day, no prompt
 lumen --season   # a random wallpaper for the season, no prompt
+lumen --season dark   # …in dark mode — or light, or auto (dark after sunset)
 lumen --thumbs   # rebuild the thumbnail cache, show nothing
 lumen --help     # all of the above, from the horse's mouth
 ```
 
 `--time` and `--season` are the menu's own entries with the menu taken out, so a
-timer can call them. They take a lock while they work: a timer firing on top of a
+timer can call them. Without a mode, `--season` follows the panel's
+*Season ▸ Dark or light* — and light when that is `ask`, since a timer has nobody
+to ask. They take a lock while they work: a timer firing on top of a
 run that is still painting would leave pywal and matugen writing over each
 other's palette, so the older run is stopped first — along with the tools it
 started, which outlive it.
@@ -209,7 +223,7 @@ is no thumbnail zoom in the menu's panel, and no menu entries in the picker's:
 | **Presets** | Save the whole configuration under a name, put any of them back, or write your changes into one you already have | The same |
 
 Six tabs, and <kbd>/</kbd> if you would rather not remember which one a setting is in.
-| **Entries** | Which of the four modes the menu offers, and folders of your own | — |
+| **Entries** | Which of the four modes the menu offers, whether Season asks dark or light, and folders of your own | — |
 | **Shape** | Window corner and border, the selected entry's pill and ring | Corners of the window, header, thumbnails and search field; window and thumbnail borders |
 | **Tags** | — | Install [wallreco](https://github.com/tungsten-w/wallreco), or run it to tag new wallpapers and recompute the old ones |
 | **Motion** | Animations on/off, speed, bounce, selection lift, and each duration on its own | The same, plus the grid's thumbnail stagger |
@@ -238,7 +252,7 @@ bar for a moment, so <kbd>Tab</kbd> never drops you somewhere you cannot name.
 **Presets** is first, and is where the panel opens: it is the one tab that
 changes everything at once, and the one nobody finds at the far end of a bar.
 
-Thirty three values for the menu, forty one for the picker, six tabs each — two
+Thirty six values for the menu, forty one for the picker, six tabs each — two
 of which hold no values at all, only the jobs and the presets below. Each tab is short
 enough to see nearly whole, and on the ones that are not, a bar down the right
 edge shows how much is still under the fold, and drags.
@@ -292,7 +306,7 @@ menu with folders they do not have.
 JSON file in `~/.config/lumen/presets`, shaped exactly like `settings.json`
 itself — so a preset is something you can read, hand-edit, keep in a dotfiles
 repo, or send to someone who liked your setup. *Save this configuration* asks for
-a name and writes all seventy four values — both windows' halves; *Apply* puts
+a name and writes all seventy seven values — both windows' halves; *Apply* puts
 them back.
 
 **A dot and a coloured name mark the preset you are on.** It is compared, not
@@ -454,6 +468,7 @@ you go hunting for it.
 |---|---|
 | Light / Dark / Time of day / Season | switches any of the four off the mode menu; <kbd>Shift</kbd>+<kbd>J</kbd> / <kbd>Shift</kbd>+<kbd>K</kbd> move one down or up the menu (light, then dark, by default) |
 | Settings button | shows or hides the cog on the mode menu |
+| Season ▸ Dark or light | `ask` shows Dark and Light after Season · `clock` follows the time of day · `dark` / `light` always |
 | Folders of your own | name, an autocompleted path, a Nerd Font icon, and an on/off switch — as many as you like |
 
 ### Shape
@@ -650,8 +665,8 @@ An executable path in `LUMEN_WALLUST_HOOK` runs after a successful Wallust
 update. Lumen passes `LUMEN_DARK_MODE=dark` or `light` and the image path in
 `LUMEN_WALLPAPER`, so a desktop setup can refresh its own themes.
 Set `LUMEN_SKIP_NOCTALIA=1` when that hook handles a different shell and you
-do not want Lumen to launch or message upstream Noctalia. Spotify reload still
-runs when Spotify is open.
+do not want Lumen to launch or message upstream Noctalia. The Spotify watcher
+still starts when Spotify is open.
 
 ### By hand — any distribution
 
@@ -732,21 +747,39 @@ the window narrower and the grid follows. Every derivation is clamped, so a
 500px header in a 300px window shrinks instead of pushing the grid off the bottom
 of the screen.
 
-**Spotify was a race, not a bug.** `spicetify reload` fired two seconds after the
+**Spotify was a race, not a bug.** The reload fired two seconds after the
 wallpaper changed and appeared to do nothing at all. It ran fine — it just ran
 early: Noctalia writes Spotify's colors from its own template three seconds in.
-`lumen` now waits for that file to actually be rewritten before reloading, rather
-than for a duration it guessed.
+`lumen` now waits for that file to actually be rewritten, rather than for a
+duration it guessed.
 
-**And then it asked twice.** Live reload needs a connection to Spotify's DevTools.
-The first `spicetify reload` after Spotify starts does not reload anything: it
-turns DevTools on, restarts Spotify once, and says on stdout to run the command
-again. Both passes exit 0 and neither takes a flag, so the exit code cannot tell
-them apart — which meant the first wallpaper of every session left Spotify on the
-old palette, looking exactly like the command being broken. `lumen` now reads
-what the run actually did and asks a second time when it has to. Exactly once: a
-run that finds no connection restarts Spotify to make one, so retrying in a loop
-would be a loop of restarts.
+**Then there was no reload to call.** The one-shot `spicetify reload` came from a
+fork whose live reload was never taken upstream; official spicetify does it with
+`spicetify watch -s`, a long-lived process that rereads the theme's `color.ini`
+every 200 ms and reloads Spotify through DevTools when it changes. So `lumen`
+no longer reloads anything itself: when Spotify is open and no watcher is
+running, it waits for Noctalia's write and starts one, detached, logging to
+`~/.cache/lumen/spicetify-watch.log`. From then on every wallpaper reaches
+Spotify on its own. A watcher older than the Spotify now open holds a dead
+DevTools address, so the next wallpaper replaces it; none is ever started
+without Spotify, because it would launch Spotify to reload it.
+
+**And Spotify must never be restarted for it.** Left to open DevTools itself,
+`watch` kills Spotify and starts it again in the same breath: the new one finds
+the old one still closing, hands over and exits, and the old one goes too. No
+Spotify, and a watcher stuck at 100% CPU waiting for a port that never opens. So
+Spotify is launched with that port open from the start, through Arch's
+`~/.config/spotify-flags.conf`:
+
+```
+--remote-debugging-port=9222
+--remote-allow-origins=http://localhost/
+```
+
+and the same two flags, `|`-separated, in `spotify_launch_flags` of
+spicetify's config, for when spicetify relaunches it. If Spotify is still found
+without the port, `lumen` restarts it itself — waiting for the old one to be
+gone first — rather than let `watch` try.
 
 **The thumbnail cache knows when it is stale.** Not only by timestamp: it reads
 the PNG header of each thumbnail and regenerates any that were built at an older,

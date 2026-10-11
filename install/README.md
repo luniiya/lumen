@@ -114,7 +114,7 @@ thinks it installed:
 
 | Kind | How it is checked | Why |
 |---|---|---|
-| Programs | `command -v` | `spicetify` lives in `~/.spicetify` and belongs to no package |
+| Programs | `command -v` | `spicetify` may come from a package or from its own installer in `~/.spicetify` |
 | Fonts | `fc-list` | A font dropped into `~/.local/share/fonts` by hand counts |
 
 <details>
@@ -136,7 +136,7 @@ thinks it installed:
 | Nerd Font | `ttf-jetbrains-mono-nerd` | fontconfig | The menu glyphs |
 | Comfortaa | `ttf-comfortaa` | fontconfig | The interface text |
 | *noctalia* | `noctalia-shell` `noctalia-git` | `noctalia` | Theming the Noctalia shell |
-| *spicetify* | `spicetify-cli` | `spicetify` | Recolouring Spotify |
+| *spicetify* | `spicetify-bin` `spicetify-cli` | `spicetify` | Recolouring Spotify |
 
 `awww` is the renamed successor of `swww` — same author, now at
 [codeberg.org/LGFae/awww](https://codeberg.org/LGFae/awww).

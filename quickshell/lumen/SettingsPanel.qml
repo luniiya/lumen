@@ -441,6 +441,28 @@ Item {
                 toggle("modes", id, panel.modeLabels[id]);
             toggle("modes", "cog", "Settings button");
 
+            // A season has no hour to it, so dark or light is asked for — or
+            // said here once, which is also what `lumen --season` goes by.
+            group("Season");
+            choice("modes", "seasonTheme", "Dark or light", [
+                {
+                    value: "ask",
+                    label: "ask"
+                },
+                {
+                    value: "auto",
+                    label: "clock"
+                },
+                {
+                    value: "dark",
+                    label: "dark"
+                },
+                {
+                    value: "light",
+                    label: "light"
+                }
+            ]);
+
             // Folders of your own sit under the four built-in entries, in the
             // one tab that is about what the menu offers. They are not part of
             // the Reset above: `touched` holds keys of a settings group, and a
