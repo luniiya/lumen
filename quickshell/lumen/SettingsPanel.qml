@@ -233,6 +233,10 @@ Item {
             label: "Move down · move up"
         },
         {
+            keys: "Shift+J · Shift+K",
+            label: "Move a mode down · up the menu"
+        },
+        {
             keys: "h / ← · l / →",
             label: "Decrease · increase — hold Shift for ×10"
         },
@@ -321,6 +325,9 @@ Item {
     onPresetStateChanged: panel.rows = panel.buildRows()
     onNamingChanged: panel.rows = panel.buildRows()
     onFolderStateChanged: panel.rows = panel.buildRows()
+    // A reset or a preset can reorder the modes from under the list.
+    readonly property string modeOrderState: Settings.modes.order
+    onModeOrderStateChanged: panel.rows = panel.buildRows()
     // The list of folders under the path line comes and goes with it.
     onEditingChanged: panel.rows = panel.buildRows()
     onOpenFolderChanged: panel.rows = panel.buildRows()
@@ -426,11 +433,12 @@ Item {
 
         switch (tab) {
         case "modes":
+            // In the order the menu shows them, so Shift+J / Shift+K reorder
+            // the list you are looking at.
             group("Entries of the mode menu");
-            toggle("modes", "dark", "Dark");
-            toggle("modes", "light", "Light");
-            toggle("modes", "time", "Time of day");
-            toggle("modes", "season", "Season");
+            touched.push("order");
+            for (const id of Settings.modeOrder())
+                toggle("modes", id, panel.modeLabels[id]);
 
             // Folders of your own sit under the four built-in entries, in the
             // one tab that is about what the menu offers. They are not part of
@@ -998,6 +1006,27 @@ Item {
             panel.selectTab(index);
     }
 
+    readonly property var modeLabels: ({
+            light: "Light",
+            dark: "Dark",
+            time: "Time of day",
+            season: "Season"
+        })
+
+    /// Moves the mode under the cursor up or down the menu, and the cursor
+    /// with it. Any other row ignores it.
+    function moveMode(by: int): bool {
+        const row = panel.rows[panel.currentIndex];
+        if (!row || row.kind !== "toggle" || row.group !== "modes")
+            return false;
+        // Moving it rebuilds the rows, through `modeOrderState`.
+        if (!Settings.moveMode(row.key, by))
+            return true;
+        panel.currentIndex = panel.rows.findIndex(other => other.kind === "toggle" && other.group === "modes" && other.key === row.key);
+        panel.reveal();
+        return true;
+    }
+
     /// Acts on the selected row: sliders move by `amount` steps, and anything
     /// that has no value to slide — a toggle, a colour — flips instead.
     function adjust(amount: real) {
@@ -1193,6 +1222,13 @@ Item {
             return true;
         }
 
+        // Shift+J / Shift+K carry a mode along the menu's order rather than
+        // only moving the cursor — on the mode rows; elsewhere they step.
+        if (shift && (event.key === Qt.Key_J || event.key === Qt.Key_Down) && panel.moveMode(1))
+            return true;
+        if (shift && (event.key === Qt.Key_K || event.key === Qt.Key_Up) && panel.moveMode(-1))
+            return true;
+
         switch (event.key) {
         case Qt.Key_Tab:
             panel.selectTab(panel.tab + 1);
@@ -1345,13 +1381,15 @@ Item {
                 font.family: Style.textFont
                 font.pixelSize: Style.textSize * 0.85
             }
+        }
 
-            MouseArea {
-                anchors.fill: parent
-                anchors.margins: -6
-                cursorShape: Qt.PointingHandCursor
-                onClicked: panel.showHelp = true
-            }
+        // Beside the Row rather than in it: a child that fills its Row stops
+        // the Row laying anything out, which pushed the hint off the panel.
+        MouseArea {
+            anchors.fill: keyHint
+            anchors.margins: -6
+            cursorShape: Qt.PointingHandCursor
+            onClicked: panel.showHelp = true
         }
 
         /// The tabs. One pill slides between them, the same way the selection
