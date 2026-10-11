@@ -116,20 +116,21 @@ OverlayWindow {
     /// from being something else.
     readonly property var commands: ["settings"]
 
-    /// Runs `query` if it is one of them, and says whether it did. Anything a
-    /// command starts with counts as being on the way to it, which is what the
-    /// hint over the grid reacts to.
-    function isCommandPrefix(query: string): bool {
-        const typed = query.trim().toLowerCase();
-        return typed.length > 0 && win.commands.some(command => command.startsWith(typed));
+    /// Whether `query` is one of them, spelt out in full. Only then does the
+    /// hint over the grid show up, so a search that merely starts with an `s`
+    /// is left to look like the search it is.
+    function isCommand(query: string): bool {
+        return win.commands.includes(query.trim().toLowerCase());
     }
 
+    /// Runs `query` if it is one of them, and says whether it did. Enter is what
+    /// runs it — the hint shows the key — never the typing alone.
     function runCommand(query: string): bool {
-        if (!win.commands.includes(query.trim().toLowerCase()))
+        if (!win.isCommand(query))
             return false;
 
-        // Clearing the field re-enters filter(), which is harmless: an empty
-        // query is no longer a command.
+        // Clearing the field re-enters filter(), which is harmless: it no
+        // longer runs commands.
         search.text = "";
         win.asideOpen = true;
         return true;
@@ -138,9 +139,6 @@ OverlayWindow {
     /// rofi's default matcher: every whitespace-separated term has to appear
     /// somewhere in the entry, case-insensitively.
     function filter(query: string) {
-        if (win.runCommand(query))
-            return;
-
         const terms = query.toLowerCase().split(/\s+/).filter(term => term.length > 0);
         win.matches = terms.length === 0 ? win.wallpapers : win.wallpapers.filter(wallpaper => {
             const name = wallpaper.name.toLowerCase();
@@ -243,7 +241,8 @@ OverlayWindow {
         switch (event.key) {
         case Qt.Key_Return:
         case Qt.Key_Enter:
-            win.activate();
+            if (!win.runCommand(search.text))
+                win.activate();
             return true;
         case Qt.Key_Left:
             win.move(-1, 0);
@@ -531,15 +530,15 @@ OverlayWindow {
             }
         }
 
-        /// What the grid area says while a command is being typed into the
-        /// search field. Without it, typing `settings` looks like a search that
-        /// matches nothing right up until it fires.
+        /// What the grid area says once a command is spelt out in the search
+        /// field. Without it, `settings` looks like a search that matches
+        /// nothing, and nothing says Enter is what opens the panel.
         Item {
             x: Style.picker.gridX
             y: Style.picker.gridY + 24
             width: Style.picker.columns * Style.picker.columnPitch
             height: Style.textSize * 2
-            opacity: win.isCommandPrefix(search.text) ? 1 : 0
+            opacity: win.isCommand(search.text) ? 1 : 0
 
             Behavior on opacity {
                 NumberAnimation {

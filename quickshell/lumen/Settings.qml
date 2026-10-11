@@ -114,14 +114,19 @@ Singleton {
         JsonAdapter {
             id: adapter
 
-            /// Which of the four entries the mode menu offers. The way into the
-            /// settings is not one of them: it is always there, or switching the
-            /// last entry off would leave a menu with no way back.
+            /// Which of the four entries the mode menu offers, in what order,
+            /// and whether the settings cog is shown beside them.
             property JsonObject modes: JsonObject {
                 property bool dark: true
                 property bool light: true
                 property bool time: true
                 property bool season: true
+                /// Whether the menu shows its settings cog. Off, Ctrl+, still
+                /// opens the panel, and the cog comes back on an empty menu.
+                property bool cog: true
+                /// The order the four are offered in, comma-separated. Read
+                /// through `modeOrder`, which forgives a hand-edited one.
+                property string order: "light,dark,time,season"
             }
 
             /// Folders of your own, each an entry in the mode menu beside the
@@ -285,7 +290,9 @@ Singleton {
             dark: true,
             light: true,
             time: true,
-            season: true
+            season: true,
+            cog: true,
+            order: "light,dark,time,season"
         },
         shape: {
             windowRadius: 20,
@@ -426,6 +433,40 @@ Singleton {
         // Not `Array.isArray`: that is false for anything handed back by the
         // adapter itself, so testing it that way would quietly wipe the list.
         adapter.folders = (list && list.length !== undefined) ? list : [];
+    }
+
+    /// The four built-in modes, in the order the menu offers them.
+    ///
+    /// `modes.order` is a string a person may edit by hand, so it is read
+    /// forgivingly: names it does not know are dropped, and any of the four it
+    /// forgot are put back at the end rather than vanishing from the menu.
+    readonly property var modeIds: ["light", "dark", "time", "season"]
+
+    function modeOrder(): var {
+        const out = [];
+        for (const id of String(adapter.modes.order ?? "").split(",")) {
+            const name = id.trim();
+            if (root.modeIds.includes(name) && !out.includes(name))
+                out.push(name);
+        }
+        for (const id of root.modeIds) {
+            if (!out.includes(id))
+                out.push(id);
+        }
+        return out;
+    }
+
+    /// Moves one mode `by` places up (negative) or down the menu, and says
+    /// whether it moved — the ends of the list are where it stops.
+    function moveMode(id: string, by: int): bool {
+        const order = root.modeOrder();
+        const from = order.indexOf(id);
+        const to = from + by;
+        if (from < 0 || to < 0 || to >= order.length)
+            return false;
+        order.splice(to, 0, order.splice(from, 1)[0]);
+        adapter.modes.order = order.join(",");
+        return true;
     }
 
     /// A folder's `icon` — a Nerd Font codepoint in hex — as a character.

@@ -182,7 +182,7 @@ outside cancels. The mode menu takes `hjkl`, arrows, <kbd>Enter</kbd> and
 <br>
 
 ⚠️ The mode menu and the picker each have their own panel — a panel only lists what
-its own window draws. Three ways in, whichever is closest to hand:
+its own window draws. A few ways in, whichever is closest to hand:
 
 ```bash
 lumen --settings            # the picker's, with the grid beside it as a preview
@@ -190,10 +190,15 @@ lumen --settings            # the picker's, with the grid beside it as a preview
 
 - <kbd>Ctrl</kbd>+<kbd>,</kbd> from inside the picker or the mode menu, each
   opening its own;
-- the **cog**, the fifth entry of the mode menu — the menu's panel, straight on
-  its **Entries** tab;
-- or type **`settings` into the picker's search field**. The grid tells you it is
-  a command as you type it, and the field clears itself once the panel is out.
+- <kbd>s</kbd> in the mode menu — the menu's panel, straight on its
+  **Entries** tab;
+- type **`settings` into the picker's search field** and press
+  <kbd>Enter</kbd>. Once the word is spelt out the grid tells you it is a
+  command, and the field clears itself once the panel is out;
+- or the **cog**, the last entry of the mode menu — the menu's panel, straight
+  on its **Entries** tab. It can be switched off there (*Settings button*);
+  <kbd>s</kbd> and <kbd>Ctrl</kbd>+<kbd>,</kbd> still work, and the cog comes
+  back by itself if every other entry is off.
 
 Nothing in there is a preview: the rows write straight into the settings, the
 style recomputes, and the window **beside it** redraws on the same frame. There
@@ -447,7 +452,8 @@ you go hunting for it.
 
 | | |
 |---|---|
-| Dark / Light / Time of day / Season | switches any of the four off the mode menu |
+| Light / Dark / Time of day / Season | switches any of the four off the mode menu; <kbd>Shift</kbd>+<kbd>J</kbd> / <kbd>Shift</kbd>+<kbd>K</kbd> move one down or up the menu (light, then dark, by default) |
+| Settings button | shows or hides the cog on the mode menu |
 | Folders of your own | name, an autocompleted path, a Nerd Font icon, and an on/off switch — as many as you like |
 
 ### Shape

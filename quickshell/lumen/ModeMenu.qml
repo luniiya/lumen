@@ -41,22 +41,23 @@ OverlayWindow {
         }
     ]
 
-    /// The way into the settings. Never filtered out: switching the last entry
-    /// off would otherwise leave a menu with no way back.
+    /// The way into the settings, switched with `modes.cog`. Off, `s` and
+    /// Ctrl+, still open them, and the cog comes back once every other entry
+    /// is switched off, so an empty menu still has a way back.
     readonly property var cog: ({
             id: "settings",
             glyph: String.fromCodePoint(0xf0493)
         })
 
-    /// The four built-in entries you have left switched on, then your own
-    /// folders, then the cog.
+    /// The four built-in entries you have left switched on, in the order you
+    /// put them in, then your own folders, then the cog.
     ///
     /// A folder answers with its path rather than with a name, so `lumen` never
     /// has to know what your categories are: it opens the picker on whatever it
     /// was handed. The mode is not decided here — it is asked for once you have
     /// picked an image.
     readonly property var entries: {
-        const out = win.builtIn.filter(entry => Settings.modes[entry.setting]);
+        const out = Settings.modeOrder().map(id => win.builtIn.find(entry => entry.id === id)).filter(entry => Settings.modes[entry.setting]);
         for (const folder of Settings.folders ?? []) {
             if (!folder || !folder.on || !folder.path)
                 continue;
@@ -65,7 +66,8 @@ OverlayWindow {
                 glyph: Settings.glyph(folder.icon)
             });
         }
-        out.push(win.cog);
+        if (Settings.modes.cog || out.length === 0)
+            out.push(win.cog);
         return out;
     }
 
@@ -118,7 +120,8 @@ OverlayWindow {
     }
 
     // Nothing is typed here, so the vim keys need no mode: `hjkl` move, `q`
-    // quits. The picker that comes next spells them the same way.
+    // quits, `s` opens the settings. The picker that comes next spells them
+    // the same way.
     onKeyPressed: event => {
         if (event.key === Qt.Key_Comma && (event.modifiers & Qt.ControlModifier) !== 0) {
             win.asideOpen = !win.asideOpen;
@@ -136,6 +139,11 @@ OverlayWindow {
         case Qt.Key_Escape:
         case Qt.Key_Q:
             Result.cancel();
+            break;
+        case Qt.Key_S:
+            // The cog's job, whether or not the menu is showing it.
+            settings.openAt("modes");
+            win.asideOpen = true;
             break;
         case Qt.Key_Left:
         case Qt.Key_H:
