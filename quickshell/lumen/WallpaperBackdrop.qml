@@ -107,7 +107,11 @@ Item {
         source: backdrop.animated ? Style.animatedWallpaper : ""
         asynchronous: true
         cache: false
-        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+        // No `sourceSize` here, unlike `image` above: on Qt 6.12, an
+        // AnimatedImage whose `sourceSize` follows its own width while layout
+        // settles recurses until the stack overflows and Quickshell segfaults
+        // the moment a GIF wallpaper is on screen. GIFs are small enough to
+        // decode at full size.
 
         // `AnimatedImage.playing` defaults to true, but not here: binding
         // `sourceSize` to `width` makes it re-decode once layout settles, and
