@@ -699,6 +699,33 @@ OverlayWindow {
             }
         }
 
+        /// The grid's wheel and trackpad scrolling. A sibling laid over it
+        /// rather than a handler inside it: the GridView is not interactive
+        /// and hands its children to its moving content item, neither of which
+        /// a wheel can be trusted to get through. It holds nothing but the
+        /// handler, so clicks and hovers still reach the thumbnails below.
+        Item {
+            x: grid.x
+            y: grid.y
+            z: 1
+            width: grid.width
+            height: grid.height
+
+            WheelHandler {
+                // The dark-or-light question sits over the grid; it is modal.
+                enabled: win.pendingPick === ""
+                onWheel: event => {
+                    // A trackpad reports pixels and scrolls 1:1; a wheel
+                    // reports notches (120 each), which glide.
+                    if (event.pixelDelta.y !== 0)
+                        grid.scrollTo(grid.headedTo - event.pixelDelta.y, false);
+                    else
+                        grid.scrollTo(grid.headedTo - event.angleDelta.y);
+                    event.accepted = true;
+                }
+            }
+        }
+
         /// `listview { columns: 3; spacing: 10px; }`
         GridView {
             id: grid
@@ -725,7 +752,10 @@ OverlayWindow {
             }
 
             Behavior on contentY {
+                enabled: grid.gliding
+
                 NumberAnimation {
+                    id: glide
                     duration: Style.scrollDuration
                     easing.type: Easing.OutCubic
                 }
@@ -734,25 +764,31 @@ OverlayWindow {
             readonly property int visibleRows: Math.max(1, Math.floor(height / cellHeight))
             readonly property real maxContentY: Math.max(0, contentHeight - height)
 
-            function scrollTo(y: real) {
-                contentY = Math.max(0, Math.min(grid.maxContentY, y));
+            /// Where the grid is headed, which mid-glide is not where it is.
+            /// Steps add to this rather than to `contentY`: each one restarts
+            /// the glide, and stacking them on the half-way position lost most
+            /// of every wheel notch — and nearly all of a trackpad swipe.
+            property real targetY: 0
+            /// Off for a trackpad, whose own stream of small steps is already
+            /// smooth and only lags behind an animation chasing it.
+            property bool gliding: true
+
+            readonly property real headedTo: glide.running ? grid.targetY : grid.contentY
+
+            function scrollTo(y: real, animated = true) {
+                grid.targetY = Math.max(0, Math.min(grid.maxContentY, y));
+                grid.gliding = animated;
+                contentY = grid.targetY;
             }
 
             /// Scrolls just far enough to bring `index` fully into view.
             function reveal(index: int) {
                 const top = Math.floor(index / Style.picker.columns) * grid.cellHeight;
                 const bottom = top + Style.picker.elementHeight;
-                if (top < grid.contentY)
+                if (top < grid.headedTo)
                     grid.scrollTo(top);
-                else if (bottom > grid.contentY + grid.height)
+                else if (bottom > grid.headedTo + grid.height)
                     grid.scrollTo(bottom - grid.height);
-            }
-
-            WheelHandler {
-                onWheel: event => {
-                    grid.scrollTo(grid.contentY - event.angleDelta.y);
-                    event.accepted = true;
-                }
             }
 
             // Filtering rearranges the grid instead of redrawing it.
