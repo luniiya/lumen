@@ -95,7 +95,8 @@ day or the season and never think about it again.
 - **Light / dark that means something** — the cursor swaps (Bibata Classic ↔
   Ice), Obsidian switches base theme, Noctalia flips mode, Spotify reloads its
   colors without restarting.
-- **Smooth wallpaper transitions** through [`awww`](https://github.com/LGFae/swww).
+- **Smooth wallpaper transitions** through [`awww`](https://github.com/LGFae/swww),
+  or [Frostalia](https://github.com/luniiya/frostalia)'s own renderer when it is on.
 - **Set and forget** — `lumen --time` and `lumen --season` pick for you, with no
   prompt at all, ready for a timer.
 - **Written in Rust**, so the whole thing is done in about the time the
