@@ -17,7 +17,8 @@ use std::time::{Duration, SystemTime};
 const THUMB_MAX_EDGE: u32 = 512;
 
 /// awww is told `--transition-duration 0.7`, so that is exactly how long the
-/// CPU-hungry theming tools should hold off before competing with it.
+/// CPU-hungry theming tools should hold off before competing with it (about as
+/// long as a Frostalia transition, too).
 const TRANSITION_GUARD: Duration = Duration::from_millis(700);
 
 // ══════════════════════════════════════════════════════════════
@@ -602,6 +603,44 @@ fn wait_for_write(path: &Path, since: SystemTime, timeout: Duration) -> bool {
 
 /// `pgrep -x` without the fork: walks /proc and compares against comm, which is
 /// the same truncated-to-15-bytes name pgrep itself matches on.
+/// Whether Frostalia took the wallpaper: its IPC call succeeded and printed
+/// nothing. It prints why when its renderer is off, and fails when the shell is
+/// not running or is too old to know the call.
+fn frostalia_took_it(success: bool, stdout: &str) -> bool {
+    success && stdout.trim().is_empty()
+}
+
+/// Puts the wallpaper up: through Frostalia when it draws the wallpaper itself
+/// (Settings → Wallpaper), else through awww.
+///
+/// Frostalia is told the mode too, so the colour mode switch that follows a
+/// moment later keeps this picture instead of picking one from its own folder.
+fn set_wallpaper(wallpaper: &Path, dark: bool) {
+    let frostalia = Command::new("qs")
+        .args(["-c", "frostalia", "ipc", "call", "wallpaper", "setFor"])
+        .arg(wallpaper)
+        .arg(if dark { "dark" } else { "light" })
+        .stderr(Stdio::null())
+        .output();
+    if let Ok(out) = frostalia {
+        if frostalia_took_it(out.status.success(), &String::from_utf8_lossy(&out.stdout)) {
+            return;
+        }
+    }
+    let _ = Command::new("awww")
+        .arg("img")
+        .arg(wallpaper)
+        .args([
+            "--transition-type",
+            "random",
+            "--transition-fps",
+            "60",
+            "--transition-duration",
+            "0.7",
+        ])
+        .status();
+}
+
 fn is_running(process_name: &str) -> bool {
     let Ok(entries) = fs::read_dir("/proc") else {
         return false;
@@ -660,18 +699,7 @@ fn apply_all(wallpaper: &Path, dark: bool) {
     }));
 
     // Wallpaper — kicked off first so the transition starts as early as possible
-    let _ = Command::new("awww")
-        .arg("img")
-        .arg(wallpaper)
-        .args([
-            "--transition-type",
-            "random",
-            "--transition-fps",
-            "60",
-            "--transition-duration",
-            "0.7",
-        ])
-        .status();
+    set_wallpaper(wallpaper, dark);
 
     {
         let wallpaper = wallpaper.to_path_buf();
@@ -1225,6 +1253,19 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frostalia_takes_the_wallpaper_only_when_it_says_nothing() {
+        assert!(frostalia_took_it(true, ""));
+        assert!(frostalia_took_it(true, "\n"));
+        // Renderer off: it says why, and awww draws it
+        assert!(!frostalia_took_it(
+            true,
+            "the wallpaper renderer is off (Settings > Wallpaper)\n"
+        ));
+        // Not running, or no such call
+        assert!(!frostalia_took_it(false, ""));
+    }
 
     #[test]
     fn classic_provider_selection() {
